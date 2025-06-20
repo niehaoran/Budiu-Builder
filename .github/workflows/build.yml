@@ -107,26 +107,6 @@ jobs:
         with:
           install: true
 
-      # 设置GitHub CLI与Copilot支持
-      - name: 设置GitHub CLI与Copilot支持
-        run: |
-          # 安装GitHub CLI扩展
-          gh extension install github/gh-copilot || {
-            echo "GitHub Copilot扩展安装失败，AI不可用"
-            exit 1
-          }
-          echo "已安装GitHub Copilot CLI扩展"
-          
-          # 验证扩展是否正确安装
-          if gh extension list | grep -q copilot; then
-            echo "GitHub Copilot CLI扩展安装成功"
-          else
-            echo "GitHub Copilot CLI扩展不可用，AI功能无法使用"
-            exit 1
-          fi
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
       # 项目预检测
       - name: 项目预检测
         id: project-detection
@@ -324,45 +304,28 @@ jobs:
             cat ../ai_response.json > Dockerfile.raw
           fi
           
-          # 清理Dockerfile内容，确保没有无效的前缀和标记
-          cat Dockerfile.raw | sed -e '/^Dockerfile$/d' \
-                                 -e 's/^Dockerfile\s*//g' \
-                                 -e 's/```dockerfile//g' \
-                                 -e 's/```//g' \
-                                 -e '/^#/!b' \
-                                 -e '/^FROM/,$p' \
-                                 -e d > Dockerfile
+          # 彻底清理Dockerfile内容，移除所有markdown格式和无效内容
+          echo "清理Dockerfile格式..."
+          # 临时文件用于处理
+          cat Dockerfile.raw | grep -v '^\s*```' | grep -v '^\s*$' > Dockerfile.tmp
           
-          # 检查Dockerfile是否以有效指令开头
-          FIRST_LINE=$(head -n 1 Dockerfile)
-          if ! echo "$FIRST_LINE" | grep -q -E "^(FROM|ARG|ONBUILD)" ; then
-            echo "生成的Dockerfile不以有效的指令开头，修正内容..."
-            # 找到第一个FROM指令
-            FROM_LINE=$(grep -n "^FROM" Dockerfile.raw | head -1 | cut -d ':' -f 1)
-            if [ -n "$FROM_LINE" ]; then
-              # 从FROM行开始提取
-              tail -n +$FROM_LINE Dockerfile.raw > Dockerfile
-            else
-              # 如果没找到FROM，创建一个基本的Dockerfile
-              echo "未找到FROM指令，创建基本Dockerfile..."
-              echo "FROM node:14-alpine" > Dockerfile
-              echo "WORKDIR /app" >> Dockerfile
-              echo "COPY . ." >> Dockerfile
-              echo "RUN if [ -f \"package.json\" ]; then npm install; fi" >> Dockerfile
-              echo "CMD [\"npm\", \"start\"]" >> Dockerfile
-            fi
-          fi
-          
-          # 检查生成结果
-          if [ ! -s Dockerfile ]; then
-            echo "AI生成Dockerfile失败，无有效输出"
-            echo "API返回内容:" 
-            cat ../ai_response.json
-            exit 1
+          # 检查是否包含FROM指令
+          if grep -q "^FROM" Dockerfile.tmp; then
+            # 提取有效Dockerfile内容 - 确保只包含有效指令
+            echo "提取有效Dockerfile内容..."
+            grep -E "^(FROM|COPY|ADD|RUN|WORKDIR|ENV|ARG|EXPOSE|CMD|ENTRYPOINT|VOLUME|USER|ONBUILD|STOPSIGNAL|HEALTHCHECK|SHELL)" Dockerfile.tmp > Dockerfile
           else
-            echo "AI已成功生成Dockerfile:"
-            cat Dockerfile
+            # 创建基本Dockerfile
+            echo "未找到有效的Dockerfile指令，创建基本Dockerfile..."
+            echo "FROM node:14-alpine" > Dockerfile
+            echo "WORKDIR /app" >> Dockerfile
+            echo "COPY . ." >> Dockerfile
+            echo "RUN if [ -f \"package.json\" ]; then npm install; fi" >> Dockerfile
+            echo "CMD [\"npm\", \"start\"]" >> Dockerfile
           fi
+          
+          echo "最终生成的Dockerfile:"
+          cat Dockerfile
         shell: bash
 
       # 验证AI生成的Dockerfile

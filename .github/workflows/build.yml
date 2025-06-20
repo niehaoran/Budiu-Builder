@@ -10,13 +10,9 @@ on:
         description: '分支名称'
         default: 'main'
         required: true
-      dockerfile_path:
-        description: 'Dockerfile路径 (相对于仓库根目录，默认为 ./Dockerfile)'
-        default: 'Dockerfile'
-        required: false
-      context_dir:
-        description: '构建上下文目录 (相对于仓库根目录，默认为 .)'
-        default: '.'
+      build_context:
+        description: '构建上下文和Dockerfile (格式: 上下文路径:Dockerfile路径，默认为.:Dockerfile)'
+        default: '.:Dockerfile'
         required: false
       build_args:
         description: '构建参数 (格式: KEY1=VALUE1,KEY2=VALUE2)'
@@ -33,44 +29,86 @@ on:
         description: '镜像仓库地址'
         default: 'docker.io'
         required: true
-      platforms:
-        description: '构建平台 (格式: linux/amd64,linux/arm64)'
-        default: 'linux/amd64'
-        required: false
-      callback_url:
-        description: '回调通知URL'
-        required: false
-      docker_username:
-        description: 'Docker仓库用户名'
+      docker_auth:
+        description: 'Docker仓库认证 (格式: 用户名:密码)'
         required: true
-      docker_password:
-        description: 'Docker仓库密码/令牌'
-        required: true
-      repo_token:
-        description: '仓库访问令牌(私有仓库需要)'
+      advanced_options:
+        description: '高级选项 (格式: platforms=linux/amd64|callback_url=http://...|repo_token=xxx)'
+        default: 'platforms=linux/amd64'
         required: false
 
 jobs:
   build:
     runs-on: ubuntu-latest
     steps:
+      - name: 解析参数
+        id: parse_params
+        run: |
+          # 解析构建上下文和Dockerfile路径
+          build_context="${{ github.event.inputs.build_context }}"
+          IFS=':' read -r context_dir dockerfile_path <<< "$build_context"
+          # 默认值处理
+          context_dir=${context_dir:-'.'}
+          dockerfile_path=${dockerfile_path:-'Dockerfile'}
+          
+          echo "context_dir=$context_dir" >> $GITHUB_OUTPUT
+          echo "dockerfile_path=$dockerfile_path" >> $GITHUB_OUTPUT
+          
+          # 解析Docker认证信息
+          docker_auth="${{ github.event.inputs.docker_auth }}"
+          IFS=':' read -r docker_username docker_password <<< "$docker_auth"
+          echo "docker_username=$docker_username" >> $GITHUB_OUTPUT
+          # 密码不输出到日志
+          
+          # 解析高级选项
+          advanced="${{ github.event.inputs.advanced_options }}"
+          # 提取平台信息
+          if [[ $advanced == *"platforms="* ]]; then
+            platforms=$(echo "$advanced" | grep -oP 'platforms=\K[^|]*')
+          else
+            platforms="linux/amd64"
+          fi
+          echo "platforms=$platforms" >> $GITHUB_OUTPUT
+          
+          # 提取回调URL
+          if [[ $advanced == *"callback_url="* ]]; then
+            callback_url=$(echo "$advanced" | grep -oP 'callback_url=\K[^|]*')
+            echo "callback_url=$callback_url" >> $GITHUB_OUTPUT
+            echo "has_callback=true" >> $GITHUB_OUTPUT
+          else
+            echo "has_callback=false" >> $GITHUB_OUTPUT
+          fi
+          
+          # 提取仓库令牌
+          if [[ $advanced == *"repo_token="* ]]; then
+            repo_token=$(echo "$advanced" | grep -oP 'repo_token=\K[^|]*')
+            echo "repo_token=$repo_token" >> $GITHUB_OUTPUT
+            echo "has_repo_token=true" >> $GITHUB_OUTPUT
+          else
+            echo "has_repo_token=false" >> $GITHUB_OUTPUT
+          fi
+        shell: bash
+
       - name: 检查输入参数
         run: |
           echo "代码仓库: ${{ github.event.inputs.repo_url }}"
           echo "分支: ${{ github.event.inputs.branch }}"
-          echo "Dockerfile路径: ${{ github.event.inputs.dockerfile_path }}"
-          echo "构建上下文: ${{ github.event.inputs.context_dir }}"
+          echo "构建上下文: ${{ steps.parse_params.outputs.context_dir }}"
+          echo "Dockerfile路径: ${{ steps.parse_params.outputs.dockerfile_path }}"
           echo "镜像名称: ${{ github.event.inputs.image_name }}"
           echo "镜像标签: ${{ github.event.inputs.image_tag }}"
           echo "镜像仓库: ${{ github.event.inputs.registry }}"
-          echo "构建平台: ${{ github.event.inputs.platforms }}"
+          echo "构建平台: ${{ steps.parse_params.outputs.platforms }}"
         shell: bash
 
       - name: 克隆源代码
         run: |
           repo_url="${{ github.event.inputs.repo_url }}"
-          repo_token="${{ github.event.inputs.repo_token }}"
           branch="${{ github.event.inputs.branch }}"
+          
+          # 获取仓库令牌
+          has_repo_token="${{ steps.parse_params.outputs.has_repo_token }}"
+          repo_token="${{ steps.parse_params.outputs.repo_token }}"
           
           # 尝试自动检测默认分支
           if [ "$branch" = "main" ] || [ "$branch" = "master" ]; then
@@ -90,7 +128,7 @@ jobs:
           echo "最终使用分支: $branch"
           
           # 处理私有仓库的身份验证
-          if [ -n "$repo_token" ]; then
+          if [ "$has_repo_token" == "true" ]; then
             # GitHub 仓库
             if [[ $repo_url == *github.com* ]]; then
               auth_repo_url=$(echo $repo_url | sed "s/https:\/\//https:\/\/$repo_token@/")
@@ -121,8 +159,8 @@ jobs:
         id: check_dockerfile
         run: |
           # 获取Dockerfile路径
-          dockerfile_path="${{ github.event.inputs.dockerfile_path }}"
-          context_dir="${{ github.event.inputs.context_dir }}"
+          context_dir="${{ steps.parse_params.outputs.context_dir }}"
+          dockerfile_path="${{ steps.parse_params.outputs.dockerfile_path }}"
           full_dockerfile_path="src/$context_dir/$dockerfile_path"
           
           # 兼容处理：如果dockerfile_path已经包含context_dir，不要重复添加
@@ -147,7 +185,7 @@ jobs:
       - name: 设置Docker Buildx
         uses: docker/setup-buildx-action@v2
         with:
-          platforms: ${{ github.event.inputs.platforms }}
+          platforms: ${{ steps.parse_params.outputs.platforms }}
           buildkitd-flags: --debug
 
       # 登录Docker仓库
@@ -155,8 +193,8 @@ jobs:
         uses: docker/login-action@v2
         with:
           registry: ${{ github.event.inputs.registry }}
-          username: ${{ github.event.inputs.docker_username }}
-          password: ${{ github.event.inputs.docker_password }}
+          username: ${{ steps.parse_params.outputs.docker_username }}
+          password: ${{ steps.parse_params.outputs.docker_password }}
       
       # 处理构建参数
       - name: 准备构建参数
@@ -164,7 +202,7 @@ jobs:
         run: |
           # 解析构建参数
           build_args="${{ github.event.inputs.build_args }}"
-          context_dir="${{ github.event.inputs.context_dir }}"
+          context_dir="${{ steps.parse_params.outputs.context_dir }}"
           
           # 构建上下文路径
           full_context_path="src/$context_dir"
@@ -196,16 +234,17 @@ jobs:
           CONTEXT_PATH: ${{ steps.build_params.outputs.context_path }}
           DOCKERFILE_PATH: ${{ steps.check_dockerfile.outputs.dockerfile_path }}
           BUILD_ARGS: ${{ steps.build_params.outputs.build_args }}
+          PLATFORMS: ${{ steps.parse_params.outputs.platforms }}
         run: |
           # 显示构建信息
           echo "构建上下文: $CONTEXT_PATH"
           echo "Dockerfile路径: $DOCKERFILE_PATH"
           echo "构建参数: $BUILD_ARGS"
-          echo "构建平台: ${{ github.event.inputs.platforms }}"
+          echo "构建平台: $PLATFORMS"
           
           # 执行构建命令
           docker buildx build \
-            --platform ${{ github.event.inputs.platforms }} \
+            --platform $PLATFORMS \
             -t ${{ github.event.inputs.registry }}/${{ github.event.inputs.image_name }}:${{ github.event.inputs.image_tag }} \
             -f $DOCKERFILE_PATH \
             $BUILD_ARGS \
@@ -217,9 +256,11 @@ jobs:
 
       # 构建完成后通知
       - name: 通知构建完成
-        if: ${{ success() && github.event.inputs.callback_url != '' }}
+        if: ${{ success() && steps.parse_params.outputs.has_callback == 'true' }}
         run: |
-          curl -X POST ${{ github.event.inputs.callback_url }} \
+          callback_url="${{ steps.parse_params.outputs.callback_url }}"
+          
+          curl -X POST $callback_url \
             -H "Content-Type: application/json" \
             -d '{
               "status": "success",
@@ -232,9 +273,11 @@ jobs:
 
       # 构建失败后通知
       - name: 通知构建失败
-        if: ${{ failure() && github.event.inputs.callback_url != '' }}
+        if: ${{ failure() && steps.parse_params.outputs.has_callback == 'true' }}
         run: |
-          curl -X POST ${{ github.event.inputs.callback_url }} \
+          callback_url="${{ steps.parse_params.outputs.callback_url }}"
+          
+          curl -X POST $callback_url \
             -H "Content-Type: application/json" \
             -d '{
               "status": "failed",

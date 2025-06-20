@@ -351,24 +351,25 @@ jobs:
             # 如果没有多阶段构建，尝试添加
             if [ $(grep -c "FROM" Dockerfile) -eq 1 ]; then
               echo "警告: 未使用多阶段构建，添加构建和运行阶段..."
-              cat > Dockerfile.new << EOF
-# 构建阶段
-FROM node:$NODE_VER-alpine AS builder
-WORKDIR /app
-COPY package*.json ./
-RUN npm ci --only=production
-COPY . .
+              NODE_VERSION=$NODE_VER
+              
+              echo "# 构建阶段" > Dockerfile.new
+              echo "FROM node:${NODE_VERSION}-alpine AS builder" >> Dockerfile.new
+              echo "WORKDIR /app" >> Dockerfile.new
+              echo "COPY package*.json ./" >> Dockerfile.new
+              echo "RUN npm ci --only=production" >> Dockerfile.new
+              echo "COPY . ." >> Dockerfile.new
+              echo "" >> Dockerfile.new
+              echo "# 运行阶段" >> Dockerfile.new
+              echo "FROM node:${NODE_VERSION}-alpine" >> Dockerfile.new
+              echo "WORKDIR /app" >> Dockerfile.new
+              echo "COPY --from=builder /app/package.json ./" >> Dockerfile.new
+              echo "COPY --from=builder /app/node_modules ./node_modules" >> Dockerfile.new
+              echo "COPY --from=builder /app/. ./" >> Dockerfile.new
+              echo "" >> Dockerfile.new
+              echo "# 设置运行命令" >> Dockerfile.new
+              echo "CMD [\"npm\", \"start\"]" >> Dockerfile.new
 
-# 运行阶段
-FROM node:$NODE_VER-alpine
-WORKDIR /app
-COPY --from=builder /app/package.json ./
-COPY --from=builder /app/node_modules ./node_modules
-COPY --from=builder /app/. ./
-
-# 设置运行命令
-CMD ["npm", "start"]
-EOF
               mv Dockerfile.new Dockerfile
             fi
           fi

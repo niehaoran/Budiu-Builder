@@ -100,18 +100,21 @@ jobs:
             echo "未检测到Dockerfile，将使用AI生成"
             echo "use_existing_dockerfile=false" >> $GITHUB_OUTPUT
             
+            # 回到工作目录保存项目信息
+            cd ..
+            
             # 收集项目信息
-            echo "项目结构:" > ../project_info.txt
-            find . -type f -not -path "*/\.*" | sort >> ../project_info.txt
+            echo "项目结构:" > "project_info.txt"
+            find src -type f -not -path "*/\.*" | sort >> "project_info.txt"
             
             # 读取根目录文件
-            echo "根目录文件列表:" >> ../project_info.txt
-            ls -la >> ../project_info.txt
+            echo "根目录文件列表:" >> "project_info.txt"
+            ls -la src/ >> "project_info.txt"
             
             # 读取README文件
-            if [ -f "README.md" ]; then
-              echo "README.md内容:" >> ../project_info.txt
-              cat README.md >> ../project_info.txt
+            if [ -f "src/README.md" ]; then
+              echo "README.md内容:" >> "project_info.txt"
+              cat src/README.md >> "project_info.txt"
             fi
           fi
         shell: bash
@@ -120,23 +123,23 @@ jobs:
       - name: 深度项目分析
         if: steps.project-detection.outputs.use_existing_dockerfile == 'false'
         run: |
-          cd src
-          echo "进行深度项目分析..." > ../project_analysis.txt
+          # 在工作目录创建分析文件
+          echo "进行深度项目分析..." > "project_analysis.txt"
           
           # 分析项目目录结构
-          find . -type f -not -path "*/\.*" -not -path "*/node_modules/*" | sort >> ../project_analysis.txt
+          find src -type f -not -path "*/\.*" -not -path "*/node_modules/*" | sort >> "project_analysis.txt"
           
           # 检测主要技术栈
-          if [ -f "package.json" ]; then
-            echo "检测到Node.js项目" >> ../project_analysis.txt
-            echo "package.json内容:" >> ../project_analysis.txt
-            cat package.json >> ../project_analysis.txt
-          elif [ -f "requirements.txt" ]; then
-            echo "检测到Python项目" >> ../project_analysis.txt
-            cat requirements.txt >> ../project_analysis.txt
-          elif [ -f "pom.xml" ]; then
-            echo "检测到Java项目" >> ../project_analysis.txt
-            cat pom.xml >> ../project_analysis.txt
+          if [ -f "src/package.json" ]; then
+            echo "检测到Node.js项目" >> "project_analysis.txt"
+            echo "package.json内容:" >> "project_analysis.txt"
+            cat src/package.json >> "project_analysis.txt"
+          elif [ -f "src/requirements.txt" ]; then
+            echo "检测到Python项目" >> "project_analysis.txt"
+            cat src/requirements.txt >> "project_analysis.txt"
+          elif [ -f "src/pom.xml" ]; then
+            echo "检测到Java项目" >> "project_analysis.txt"
+            cat src/pom.xml >> "project_analysis.txt"
           fi
         shell: bash
 
@@ -145,40 +148,49 @@ jobs:
         if: steps.project-detection.outputs.use_existing_dockerfile == 'false'
         id: prepare-prompt
         run: |
-          # 基础提示
+          # 确保在工作目录而非src目录中操作
           echo "准备AI提示内容..."
-          echo "请基于项目分析结果，创建高质量Dockerfile，考虑：" > ../prompt.txt
-          echo "1. 选择合适的基础镜像(优先alpine版本)" >> ../prompt.txt
-          echo "2. 使用多阶段构建分离构建环境和运行环境" >> ../prompt.txt
-          echo "3. 仅复制必要文件，优化层顺序，合并RUN命令" >> ../prompt.txt
-          echo "4. 清理不必要的缓存和临时文件" >> ../prompt.txt
-          echo "5. 选择合适的端口和启动命令" >> ../prompt.txt
+          echo "请基于项目分析结果，创建高质量Dockerfile，考虑：" > prompt.txt
+          echo "1. 选择合适的基础镜像(优先alpine版本)" >> prompt.txt
+          echo "2. 使用多阶段构建分离构建环境和运行环境" >> prompt.txt
+          echo "3. 仅复制必要文件，优化层顺序，合并RUN命令" >> prompt.txt
+          echo "4. 清理不必要的缓存和临时文件" >> prompt.txt
+          echo "5. 选择合适的端口和启动命令" >> prompt.txt
           
           # 根据优化选项调整提示
           AI_OPTION="${{ github.event.inputs.ai_options }}"
           if [ "$AI_OPTION" == "size" ] || [ -z "$AI_OPTION" ]; then
-            echo "优化目标：最小化镜像体积" >> ../prompt.txt
+            echo "优化目标：最小化镜像体积" >> prompt.txt
           elif [ "$AI_OPTION" == "security" ]; then
-            echo "优化目标：提高安全性" >> ../prompt.txt
+            echo "优化目标：提高安全性" >> prompt.txt
           elif [ "$AI_OPTION" == "speed" ]; then
-            echo "优化目标：提高构建和运行速度" >> ../prompt.txt
+            echo "优化目标：提高构建和运行速度" >> prompt.txt
           fi
           
-          # 添加收集的项目信息
-          echo "项目信息:" >> ../prompt.txt
-          cat ../project_info.txt >> ../prompt.txt
-          cat ../project_analysis.txt >> ../prompt.txt
+          # 添加收集的项目信息，确保文件存在再读取
+          echo "项目信息:" >> prompt.txt
+          if [ -f "project_info.txt" ]; then
+            cat project_info.txt >> prompt.txt
+          else
+            echo "项目信息文件不存在，可能在项目预检测步骤未生成" >> prompt.txt
+            # 创建简单的项目结构信息作为备用
+            echo "当前工作目录文件:" >> prompt.txt
+            ls -la src/ >> prompt.txt
+          fi
           
+          if [ -f "project_analysis.txt" ]; then
+            cat project_analysis.txt >> prompt.txt
+          else
+            echo "项目分析文件不存在，可能在深度项目分析步骤未生成" >> prompt.txt
+          fi
+
       # 使用讯飞星火AI生成Dockerfile
       - name: 使用讯飞星火AI生成Dockerfile
         if: steps.project-detection.outputs.use_existing_dockerfile == 'false'
         id: generate-dockerfile
         run: |
-          cd src
-          echo "使用讯飞星火AI分析项目并生成Dockerfile..."
-          
           # 获取提示内容
-          PROMPT=$(cat ../prompt.txt)
+          echo "使用讯飞星火AI分析项目并生成Dockerfile..."
           
           # API认证和请求参数
           SPARK_API_PASSWORD="${{ secrets.SPARK_API_PASSWORD }}"
@@ -189,6 +201,80 @@ jobs:
             echo "错误: 未设置SPARK_API_PASSWORD密钥"
             exit 1
           fi
+          
+          # 准备请求体JSON
+          PROMPT_CONTENT=$(cat "prompt.txt" | sed 's/"/\\"/g' | tr '\n' ' ')
+          echo '{
+            "model": "lite",
+            "user": "github-actions-user",
+            "messages": [
+              {
+                "role": "user",
+                "content": "'$PROMPT_CONTENT'"
+              }
+            ],
+            "temperature": 0.5,
+            "max_tokens": 4096,
+            "stream": false
+          }' > "spark_request.json"
+          
+          # 发送API请求
+          curl -s -X POST "$AUTH_URL" \
+            -H "Content-Type: application/json" \
+            -H "Authorization: Bearer $SPARK_API_PASSWORD" \
+            -d @"spark_request.json" > "ai_response.json"
+          
+          # 检查API响应
+          if grep -q "\"error\":" "ai_response.json"; then
+            echo "API返回错误:"
+            cat "ai_response.json"
+            exit 1
+          fi
+          
+          # 调试信息：显示原始响应
+          echo "AI响应内容："
+          cat "ai_response.json"
+          
+          # 从响应中提取Dockerfile内容
+          if jq -e '.choices[0].message.content' "ai_response.json" > /dev/null 2>&1; then
+            # 标准格式
+            jq -r '.choices[0].message.content' "ai_response.json" > src/Dockerfile.raw
+          elif jq -e '.payload.choices.text[0].content' "ai_response.json" > /dev/null 2>&1; then
+            # 备用格式
+            jq -r '.payload.choices.text[0].content' "ai_response.json" > src/Dockerfile.raw
+          else
+            echo "无法从API响应中提取内容，创建默认Dockerfile"
+            echo "FROM node:14-alpine" > src/Dockerfile
+            echo "WORKDIR /app" >> src/Dockerfile
+            echo "COPY . ." >> src/Dockerfile
+            echo "CMD [\"npm\", \"start\"]" >> src/Dockerfile
+            exit 0
+          fi
+          
+          # 进入src目录处理Dockerfile
+          cd src
+          
+          # 确保输出文件存在
+          touch Dockerfile.raw
+          
+          # 清理Dockerfile内容，移除markdown格式
+          cat Dockerfile.raw | grep -v '^\s*```' | grep -v '^\s*$' > Dockerfile.tmp
+          
+          # 提取有效Dockerfile内容
+          if grep -q "^FROM" Dockerfile.tmp; then
+            grep -E "^(FROM|COPY|ADD|RUN|WORKDIR|ENV|ARG|EXPOSE|CMD|ENTRYPOINT|VOLUME|USER|ONBUILD|STOPSIGNAL|HEALTHCHECK|SHELL)" Dockerfile.tmp > Dockerfile
+          else
+            # 创建基本Dockerfile作为后备
+            echo "未找到有效的Dockerfile指令，创建基本模板..."
+            echo "FROM node:14-alpine" > Dockerfile
+            echo "WORKDIR /app" >> Dockerfile
+            echo "COPY . ." >> Dockerfile
+            echo "RUN if [ -f \"package.json\" ]; then npm install; fi" >> Dockerfile
+            echo "CMD [\"npm\", \"start\"]" >> Dockerfile
+          fi
+          
+          echo "生成的Dockerfile内容:"
+          cat Dockerfile
 
       # 验证AI生成的Dockerfile
       - name: 验证Dockerfile

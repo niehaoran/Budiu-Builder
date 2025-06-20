@@ -1,0 +1,97 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Budiu-Builder 应用构建系统</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+
+<body>
+  <header>
+    <h1>Budiu-Builder</h1>
+    <p>基于GitHub Actions的自动构建系统</p>
+  </header>
+
+  <main>
+    <div class="card">
+      <h2>提交构建</h2>
+      <form id="buildForm">
+        <div class="form-group">
+          <label for="repoUrl">代码仓库 URL:</label>
+          <input type="text" id="repoUrl" placeholder="例如: https://github.com/username/repo" required>
+        </div>
+
+        <div class="form-group">
+          <label for="branch">分支:</label>
+          <input type="text" id="branch" value="main">
+        </div>
+
+        <div class="form-group">
+          <label for="imageName">镜像名称:</label>
+          <input type="text" id="imageName" placeholder="例如: myusername/myapp" required>
+        </div>
+
+        <div class="form-group">
+          <label for="imageTag">镜像标签:</label>
+          <input type="text" id="imageTag" value="latest">
+        </div>
+
+        <div class="form-group">
+          <label for="registry">镜像仓库地址:</label>
+          <input type="text" id="registry" value="docker.io">
+        </div>
+
+        <div class="form-group">
+          <label for="apiEndpoint">API 端点:</label>
+          <input type="text" id="apiEndpoint" placeholder="https://your-backend-api.com/api">
+        </div>
+
+        <button type="submit">提交构建请求</button>
+      </form>
+    </div>
+
+    <div id="statusCard" class="card hidden">
+      <h2>构建状态</h2>
+      <div id="statusOutput" class="status"></div>
+
+      <div id="buildDetails" class="hidden">
+        <h3>构建详情</h3>
+        <table>
+          <tr>
+            <th>构建 ID</th>
+            <td id="buildId"></td>
+          </tr>
+          <tr>
+            <th>状态</th>
+            <td id="buildStatus"></td>
+          </tr>
+          <tr>
+            <th>创建时间</th>
+            <td id="createdAt"></td>
+          </tr>
+          <tr>
+            <th>更新时间</th>
+            <td id="updatedAt"></td>
+          </tr>
+          <tr id="imageRow" class="hidden">
+            <th>镜像</th>
+            <td id="imageUrl"></td>
+          </tr>
+        </table>
+
+        <button id="refreshStatus" style="margin-top: 15px;">刷新状态</button>
+      </div>
+    </div>
+  </main>
+
+  <footer>
+    <p>Budiu-Builder &copy; 2023 - <a href="https://github.com/your-username/Budiu-Builder" target="_blank">GitHub仓库</a>
+    </p>
+  </footer>
+
+  <script src="app.js"></script>
+</body>
+
+</html>

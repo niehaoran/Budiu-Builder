@@ -569,15 +569,15 @@ jobs:
               # 如果是重试，添加错误信息到提示中
               if [ -f "../dockerfile_error.txt" ]; then
                 ERROR_FEEDBACK=$(cat ../dockerfile_error.txt)
-                RETRY_PROMPT="上次生成的Dockerfile存在以下问题：
+                RETRY_PROMPT='上次生成的Dockerfile存在以下问题：
 
-$ERROR_FEEDBACK
+'"$ERROR_FEEDBACK"'
 
-请根据以上错误信息修复Dockerfile。这是第 $RETRY_COUNT 次尝试，共有 $MAX_RETRIES 次机会。请确保:
+请根据以上错误信息修复Dockerfile。这是第 '"$RETRY_COUNT"' 次尝试，共有 '"$MAX_RETRIES"' 次机会。请确保:
 1. 解决所有报告的错误
 2. 确保所有COPY/ADD指令引用的文件确实存在
 3. 如果使用多阶段构建，确保阶段名称正确
-4. 根据项目类型提供正确的CMD或ENTRYPOINT指令"
+4. 根据项目类型提供正确的CMD或ENTRYPOINT指令'
                 PROMPT="$PROMPT\n\n$RETRY_PROMPT"
               fi
             fi
@@ -589,16 +589,16 @@ $ERROR_FEEDBACK
             if [ -n "$BUILD_ERROR_FEEDBACK" ]; then
               echo "检测到构建错误，将错误信息提供给AI以重新生成Dockerfile..."
               
-              BUILD_ERROR_PROMPT="
+              BUILD_ERROR_PROMPT='
 上次生成的Dockerfile构建失败，以下是错误信息和分析：
 
-$BUILD_ERROR_FEEDBACK
+'"$BUILD_ERROR_FEEDBACK"'
 
 请根据以上错误分析修复Dockerfile，确保它能够正确构建。特别注意：
 1. 确保使用正确的基础镜像和依赖安装命令
 2. 确保文件路径正确，COPY/ADD指令引用的所有文件都存在
 3. 提供正确的启动命令
-4. 如使用多阶段构建，确保阶段名称引用正确"
+4. 如使用多阶段构建，确保阶段名称引用正确'
               
               echo "$BUILD_ERROR_PROMPT" >> ../prompt.txt
               # 清除环境变量，避免重复添加

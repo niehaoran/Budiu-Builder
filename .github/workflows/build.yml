@@ -250,21 +250,21 @@ jobs:
           # 生成请求URL
           AUTH_URL="https://spark-api-open.xf-yun.com/v1/chat/completions"
           
-          # 构建请求体 - 使用正确的讯飞星火模型参数格式
-          # 创建临时JSON文件，以避免shell中的转义问题
-          cat > ../spark_request.json << EOF
-{
-  "model": "lite",
-  "messages": [
-    {
-      "role": "user",
-      "content": "$PROMPT"
-    }
-  ],
-  "temperature": 0.5,
-  "max_tokens": 4096
-}
-EOF
+          # 读取PROMPT内容并转义为JSON字符串
+          PROMPT_CONTENT=$(cat ../prompt.txt | sed 's/"/\\"/g' | tr '\n' ' ')
+          
+          # 构建请求体JSON
+          echo '{
+            "model": "lite",
+            "messages": [
+              {
+                "role": "user",
+                "content": "'$PROMPT_CONTENT'"
+              }
+            ],
+            "temperature": 0.5,
+            "max_tokens": 4096
+          }' > ../spark_request.json
           
           # 执行HTTP请求
           echo "调用讯飞星火API生成Dockerfile..."

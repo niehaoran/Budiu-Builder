@@ -97,6 +97,47 @@ jobs:
           fi
         shell: bash
 
+      # 预分析源代码，检测构建脚本信息
+      - name: 分析源代码信息
+        id: analyze-source
+        run: |
+          cd src
+          
+          # 检测package.json中的构建脚本
+          if [ -f "package.json" ]; then
+            echo "检测Node.js项目中的构建脚本..."
+            
+            # 提取所有脚本命令
+            scripts=$(grep -o '"scripts": {[^}]*}' package.json || echo "")
+            
+            build_script=""
+            # 按优先顺序检测构建脚本
+            for script_name in "build" "build:prod" "build:production" "dist" "generate" "compile"; do
+              if echo "$scripts" | grep -q "\"$script_name\""; then
+                build_script=$script_name
+                echo "找到构建脚本: $build_script"
+                break
+              fi
+            done
+            
+            # 如果找不到构建脚本，但有start脚本
+            if [ -z "$build_script" ] && echo "$scripts" | grep -q "\"start\""; then
+              echo "未找到构建脚本，但存在start脚本，将使用start脚本"
+              build_script="start"
+            fi
+            
+            # 如果找到构建脚本，保存到输出
+            if [ -n "$build_script" ]; then
+              echo "build_script=$build_script" >> $GITHUB_OUTPUT
+            else
+              echo "build_script=none" >> $GITHUB_OUTPUT
+              echo "警告：未找到任何构建脚本，将直接拷贝文件构建静态网站"
+            fi
+          else
+            echo "build_script=none" >> $GITHUB_OUTPUT
+          fi
+        shell: bash
+
       # 设置Docker Buildx (支持多平台构建)
       - name: 设置Docker Buildx
         uses: docker/setup-buildx-action@v2
@@ -124,6 +165,9 @@ jobs:
             exit 0
           fi
           
+          # 获取之前步骤中检测到的构建脚本
+          build_script="${{ steps.analyze-source.outputs.build_script }}"
+          
           # 生成适合项目类型的Dockerfile
           echo "未检测到项目中的Dockerfile，根据项目类型自动生成"
           
@@ -133,7 +177,6 @@ jobs:
             
             # 检测项目类型
             npm_start=$(grep -w "start" package.json || echo "")
-            npm_build=$(grep -w "build" package.json || echo "")
             
             # 检测框架类型
             has_react=$(grep -i "react" package.json || echo "")
@@ -153,14 +196,23 @@ jobs:
           WORKDIR /app
           COPY . .
           RUN npm ci --legacy-peer-deps || npm install --legacy-peer-deps
-          RUN npm run build
+          EOF
+          
+              # 根据检测到的构建脚本添加构建命令
+              if [ "$build_script" != "none" ]; then
+                echo "RUN npm run $build_script" >> Dockerfile
+              else
+                echo "# 未检测到构建脚本，跳过构建步骤" >> Dockerfile
+              fi
+          
+              cat >> Dockerfile <<EOF
           
           FROM node:16-alpine
           WORKDIR /app
           COPY --from=builder /app/package*.json ./
-          COPY --from=builder /app/next.config.js ./
-          COPY --from=builder /app/public ./public
-          COPY --from=builder /app/.next ./.next
+          COPY --from=builder /app/next.config.js* ./
+          COPY --from=builder /app/public* ./public/
+          COPY --from=builder /app/.next* ./.next/
           COPY --from=builder /app/node_modules ./node_modules
           
           ENV NODE_ENV=production
@@ -179,14 +231,23 @@ jobs:
           WORKDIR /app
           COPY . .
           RUN npm ci --legacy-peer-deps || npm install --legacy-peer-deps
-          RUN npm run build
+          EOF
+          
+              # 根据检测到的构建脚本添加构建命令
+              if [ "$build_script" != "none" ]; then
+                echo "RUN npm run $build_script" >> Dockerfile
+              else
+                echo "# 未检测到构建脚本，跳过构建步骤" >> Dockerfile
+              fi
+          
+              cat >> Dockerfile <<EOF
           
           FROM node:16-alpine
           WORKDIR /app
           COPY --from=builder /app/package*.json ./
-          COPY --from=builder /app/.nuxt ./.nuxt
-          COPY --from=builder /app/static ./static
-          COPY --from=builder /app/nuxt.config.js ./nuxt.config.js
+          COPY --from=builder /app/.nuxt* ./.nuxt/
+          COPY --from=builder /app/static* ./static/
+          COPY --from=builder /app/nuxt.config.js* ./
           COPY --from=builder /app/node_modules ./node_modules
           
           ENV NODE_ENV=production
@@ -206,12 +267,37 @@ jobs:
           COPY package*.json ./
           RUN npm ci --legacy-peer-deps || npm install --legacy-peer-deps
           COPY . .
-          RUN npm run build
+          EOF
+          
+              # 根据检测到的构建脚本添加构建命令
+              if [ "$build_script" != "none" ]; then
+                echo "RUN npm run $build_script" >> Dockerfile
+              fi
+          
+              cat >> Dockerfile <<EOF
           
           FROM nginx:alpine
-          COPY --from=builder /app/build /usr/share/nginx/html
-          # 如果使用Vue，取消下面注释
-          # COPY --from=builder /app/dist /usr/share/nginx/html
+          EOF
+          
+              # 根据框架类型和构建脚本选择输出目录
+              if [ "$build_script" == "none" ]; then
+                # 没有构建脚本，直接复制源码
+                echo "COPY --from=builder /app /usr/share/nginx/html" >> Dockerfile
+              else
+                if [ -n "$has_vue" ]; then
+                  # Vue项目通常输出到dist目录
+                  echo "COPY --from=builder /app/dist /usr/share/nginx/html" >> Dockerfile
+                else
+                  # React项目通常输出到build目录
+                  echo "COPY --from=builder /app/build /usr/share/nginx/html" >> Dockerfile
+                  # 如果是其他目录，添加备用方案
+                  echo "# 如果使用其他输出目录，取消相应注释" >> Dockerfile
+                  echo "# COPY --from=builder /app/dist /usr/share/nginx/html" >> Dockerfile
+                  echo "# COPY --from=builder /app/output /usr/share/nginx/html" >> Dockerfile
+                fi
+              fi
+          
+              cat >> Dockerfile <<EOF
           
           # 创建默认nginx配置，支持SPA应用
           RUN echo 'server { \
@@ -219,7 +305,7 @@ jobs:
               location / { \
                   root /usr/share/nginx/html; \
                   index index.html; \
-                  try_files $uri $uri/ /index.html; \
+                  try_files \$uri \$uri/ /index.html; \
               } \
           }' > /etc/nginx/conf.d/default.conf
           
@@ -239,6 +325,14 @@ jobs:
           COPY package*.json ./
           RUN npm ci --legacy-peer-deps || npm install --legacy-peer-deps
           COPY . .
+          EOF
+          
+              # 如果有构建脚本且不是start，先运行构建脚本
+              if [ "$build_script" != "none" ] && [ "$build_script" != "start" ]; then
+                echo "RUN npm run $build_script" >> Dockerfile
+              fi
+          
+              cat >> Dockerfile <<EOF
           
           EXPOSE 3000
           CMD ["npm", "start"]

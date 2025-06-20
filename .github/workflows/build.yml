@@ -236,7 +236,7 @@ jobs:
           请生成完整的Dockerfile，不要包含任何注释或解释:"
           
           # 调用GitHub Copilot CLI
-          echo "$PROMPT" | gh copilot suggest -t dockerfile > ../dockerfile_gen.txt || {
+          echo "$PROMPT" | gh copilot suggest -t shell > ../dockerfile_gen.txt || {
             echo "GitHub Copilot CLI调用失败，AI不可用"
             exit 1
           }

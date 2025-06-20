@@ -92,11 +92,15 @@ jobs:
 
       # 登录Docker仓库
       - name: 登录镜像仓库
-        uses: docker/login-action@v2
-        with:
-          registry: ${{ github.event.inputs.registry }}
-          username: ${{ github.event.inputs.docker_auth | split: ':' | first }}
-          password: ${{ github.event.inputs.docker_auth | split: ':' | last }}
+        run: |
+          # 分割Docker认证字符串
+          DOCKER_AUTH="${{ github.event.inputs.docker_auth }}"
+          DOCKER_USERNAME=$(echo $DOCKER_AUTH | cut -d':' -f1)
+          DOCKER_PASSWORD=$(echo $DOCKER_AUTH | cut -d':' -f2-)
+          
+          # 使用Docker登录命令
+          echo $DOCKER_PASSWORD | docker login ${{ github.event.inputs.registry }} -u $DOCKER_USERNAME --password-stdin
+        shell: bash
 
       # 设置GitHub CLI与Copilot支持
       - name: 设置GitHub CLI与Copilot支持

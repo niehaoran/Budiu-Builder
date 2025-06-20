@@ -146,7 +146,7 @@ jobs:
           fi
         shell: bash
 
-      # 使用AI生成Dockerfile
+      # 使用讯飞星火Spark Lite生成Dockerfile
       - name: 使用讯飞星火Spark Lite生成Dockerfile
         if: steps.project-detection.outputs.use_existing_dockerfile == 'false'
         id: generate-dockerfile
@@ -189,31 +189,32 @@ jobs:
           fi
           
           # 准备提示信息
-          PROMPT="分析以下源代码仓库，创建一个生产级别的Dockerfile，特别注重镜像大小优化。要求:"
+          PROMPT="请仔细分析以下源代码仓库，创建一个生产级别的高质量Dockerfile。根据分析结果，考虑：
+
+          1. 分析项目类型和依赖后，优先选择alpine版本的基础镜像（如node:14-alpine等）以减小体积
+          2. 如果项目结构适合，考虑使用多阶段构建来分离构建环境和运行环境
+          3. 仅复制实际需要的文件，避免包含.git、tests等非生产必要目录
+          4. 合理安排层的顺序，将频繁变化的层放在后面以优化缓存
+          5. 尽量合并RUN命令以减少层数
+          6. 构建完成后清理不必要的缓存和临时文件
+          7. 对于Node.js项目，使用--production标志安装依赖
+
+          请注意：我只有5次机会获得正确的Dockerfile。如果生成的Dockerfile有错误，我会要求您重写，但最多只能尝试5次。"
           
           # 根据用户选择的优化选项调整提示
           AI_OPTION="${{ github.event.inputs.ai_options }}"
           if [ "$AI_OPTION" == "size" ] || [ -z "$AI_OPTION" ]; then
             PROMPT="$PROMPT
-            1. 必须使用alpine版本的基础镜像，如node:14-alpine而不是node:14
-            2. 必须使用多阶段构建，将构建过程和运行环境分开
-            3. 只复制生产运行必要的文件，忽略.git、tests等目录 
-            4. 优化层顺序，确保频繁变化的层在最后
-            5. 整合RUN命令，减少层数
-            6. 构建完成后清理缓存和临时文件
-            7. 如果使用Node.js，确保使用--production标志安装依赖"
+
+          您应该特别重视镜像体积的优化，包括：选择最小的基础镜像、删除所有缓存和临时文件、最小化层数。"
           elif [ "$AI_OPTION" == "security" ]; then
             PROMPT="$PROMPT
-            1. 优先考虑安全性，使用官方安全基础镜像
-            2. 添加用户权限控制，避免使用root用户
-            3. 最小化攻击面，仅包含必要组件
-            4. 实施安全扫描和最佳实践"
+            
+          您应该特别重视安全性，包括：选择官方维护良好的基础镜像、避免使用root用户、最小化攻击面、仅包含必要组件。"
           elif [ "$AI_OPTION" == "speed" ]; then
             PROMPT="$PROMPT
-            1. 优先考虑应用启动和运行速度
-            2. 优化缓存和层结构提高构建速度
-            3. 预安装关键依赖
-            4. 配置应用优化参数"
+            
+          您应该特别重视构建和运行速度，包括：优化构建缓存策略、预安装关键依赖、调整配置参数以提高启动和运行性能。"
           fi
           
           PROMPT="$PROMPT
@@ -224,108 +225,163 @@ jobs:
           
           请生成完整的Dockerfile，不要包含任何注释或解释。"
           
-          # 将PROMPT保存为文件
-          echo "$PROMPT" > ../prompt.txt
+          # 开始重试生成逻辑
+          MAX_RETRIES=5
+          RETRY_COUNT=0
+          DOCKERFILE_VALID=false
           
-          # 配置讯飞星火API参数
-          # 使用HTTP服务接口认证信息中的APIPassword
-          SPARK_API_PASSWORD="${{ secrets.SPARK_API_PASSWORD }}"
-          
-          # 检查密钥是否设置
-          if [ -z "$SPARK_API_PASSWORD" ]; then
-            echo "错误: 未设置SPARK_API_PASSWORD密钥。请在GitHub仓库的Settings > Secrets > Actions中添加此密钥。"
-            echo "密钥值应为讯飞星火HTTP服务接口认证信息中的APIPassword。"
-            exit 1
-          fi
-          
-          # 生成请求URL
-          AUTH_URL="https://spark-api-open.xf-yun.com/v1/chat/completions"
-          
-          # 读取PROMPT内容并转义为JSON字符串
-          PROMPT_CONTENT=$(cat ../prompt.txt | sed 's/"/\\"/g' | tr '\n' ' ')
-          
-          # 构建请求体JSON - 参考Python示例，但使用非流式响应
-          echo '{
-            "model": "lite",
-            "user": "github-actions-user",
-            "messages": [
-              {
-                "role": "user",
-                "content": "'$PROMPT_CONTENT'"
-              }
-            ],
-            "temperature": 0.5,
-            "max_tokens": 4096,
-            "stream": false
-          }' > ../spark_request.json
-          
-          # 执行HTTP请求
-          echo "调用讯飞星火API生成Dockerfile..."
-          curl -v -X POST "$AUTH_URL" \
-            -H "Content-Type: application/json" \
-            -H "Authorization: Bearer $SPARK_API_PASSWORD" \
-            -d @../spark_request.json > ../ai_response.json 2> ../ai_response_headers.txt
-          
-          # 检查API调用是否成功
-          if [ $? -ne 0 ]; then
-            echo "讯飞星火API调用失败"
+          # 循环尝试生成Dockerfile，直到成功或达到最大重试次数
+          while [ $RETRY_COUNT -lt $MAX_RETRIES ] && [ "$DOCKERFILE_VALID" != "true" ]; do
+            RETRY_COUNT=$((RETRY_COUNT + 1))
+            
+            if [ $RETRY_COUNT -gt 1 ]; then
+              echo "第 $RETRY_COUNT 次尝试生成Dockerfile (最多 $MAX_RETRIES 次)..."
+              # 如果是重试，添加错误信息到提示中
+              if [ -f "../dockerfile_error.txt" ]; then
+                ERROR_FEEDBACK=$(cat ../dockerfile_error.txt)
+                RETRY_PROMPT="上次生成的Dockerfile存在问题：$ERROR_FEEDBACK\n\n请修复以上问题并重新生成Dockerfile。这是第 $RETRY_COUNT 次尝试，共有 $MAX_RETRIES 次机会。"
+                PROMPT="$PROMPT\n\n$RETRY_PROMPT"
+              fi
+            fi
+            
+            # 将PROMPT保存为文件
+            echo "$PROMPT" > ../prompt.txt
+            
+            # 配置讯飞星火API参数
+            # 使用HTTP服务接口认证信息中的APIPassword
+            SPARK_API_PASSWORD="${{ secrets.SPARK_API_PASSWORD }}"
+            
+            # 检查密钥是否设置
+            if [ -z "$SPARK_API_PASSWORD" ]; then
+              echo "错误: 未设置SPARK_API_PASSWORD密钥。请在GitHub仓库的Settings > Secrets > Actions中添加此密钥。"
+              echo "密钥值应为讯飞星火HTTP服务接口认证信息中的APIPassword。"
+              exit 1
+            fi
+            
+            # 生成请求URL
+            AUTH_URL="https://spark-api-open.xf-yun.com/v1/chat/completions"
+            
+            # 读取PROMPT内容并转义为JSON字符串
+            PROMPT_CONTENT=$(cat ../prompt.txt | sed 's/"/\\"/g' | tr '\n' ' ')
+            
+            # 构建请求体JSON - 参考Python示例，但使用非流式响应
+            echo '{
+              "model": "lite",
+              "user": "github-actions-user",
+              "messages": [
+                {
+                  "role": "user",
+                  "content": "'$PROMPT_CONTENT'"
+                }
+              ],
+              "temperature": 0.5,
+              "max_tokens": 4096,
+              "stream": false
+            }' > ../spark_request.json
+            
+            # 执行HTTP请求
+            echo "调用讯飞星火API生成Dockerfile..."
+            curl -v -X POST "$AUTH_URL" \
+              -H "Content-Type: application/json" \
+              -H "Authorization: Bearer $SPARK_API_PASSWORD" \
+              -d @../spark_request.json > ../ai_response.json 2> ../ai_response_headers.txt
+            
+            # 检查API调用是否成功
+            if [ $? -ne 0 ]; then
+              echo "讯飞星火API调用失败"
+              cat ../ai_response_headers.txt
+              exit 1
+            fi
+            
+            # 显示API响应状态和详细信息
+            echo "API响应头和状态码:"
             cat ../ai_response_headers.txt
-            exit 1
-          fi
-          
-          # 显示API响应状态和详细信息
-          echo "API响应头和状态码:"
-          cat ../ai_response_headers.txt
-          
-          echo "API响应内容:"
-          cat ../ai_response.json
-          
-          # 检查是否包含错误
-          if grep -q "\"error\":" ../ai_response.json; then
-            echo "API返回错误信息:"
-            jq -r '.error.message // "未知错误"' ../ai_response.json 2>/dev/null || cat ../ai_response.json
-            exit 1
-          fi
-          
-          # 检查响应中是否有code字段
-          CODE=$(jq -r '.code // "未返回code"' ../ai_response.json 2>/dev/null || echo "未返回code")
-          if [ "$CODE" != "0" ] && [ "$CODE" != "未返回code" ]; then
-            echo "讯飞星火API返回错误，错误代码: $CODE"
-            echo "错误信息: $(jq -r '.message // "未知错误"' ../ai_response.json 2>/dev/null || echo "未知错误")"
-            exit 1
-          fi
-          
-          # 尝试两种可能的响应格式提取内容
-          if jq -e '.choices[0].message.content' ../ai_response.json > /dev/null 2>&1; then
-            # 标准OpenAI格式
-            jq -r '.choices[0].message.content' ../ai_response.json > Dockerfile.raw
-          elif jq -e '.payload.choices.text[0].content' ../ai_response.json > /dev/null 2>&1; then
-            # 讯飞星火可能的另一种格式
-            jq -r '.payload.choices.text[0].content' ../ai_response.json > Dockerfile.raw
-          else
-            # 如果上面都失败，尝试直接提取所有文本内容
-            cat ../ai_response.json > Dockerfile.raw
-          fi
-          
-          # 彻底清理Dockerfile内容，移除所有markdown格式和无效内容
-          echo "清理Dockerfile格式..."
-          # 临时文件用于处理
-          cat Dockerfile.raw | grep -v '^\s*```' | grep -v '^\s*$' > Dockerfile.tmp
-          
-          # 检查是否包含FROM指令
-          if grep -q "^FROM" Dockerfile.tmp; then
-            # 提取有效Dockerfile内容 - 确保只包含有效指令
-            echo "提取有效Dockerfile内容..."
-            grep -E "^(FROM|COPY|ADD|RUN|WORKDIR|ENV|ARG|EXPOSE|CMD|ENTRYPOINT|VOLUME|USER|ONBUILD|STOPSIGNAL|HEALTHCHECK|SHELL)" Dockerfile.tmp > Dockerfile
-          else
-            # 创建基本Dockerfile
-            echo "未找到有效的Dockerfile指令，创建基本Dockerfile..."
-            echo "FROM node:14-alpine" > Dockerfile
-            echo "WORKDIR /app" >> Dockerfile
-            echo "COPY . ." >> Dockerfile
-            echo "RUN if [ -f \"package.json\" ]; then npm install; fi" >> Dockerfile
-            echo "CMD [\"npm\", \"start\"]" >> Dockerfile
-          fi
+            
+            echo "API响应内容:"
+            cat ../ai_response.json
+            
+            # 检查是否包含错误
+            if grep -q "\"error\":" ../ai_response.json; then
+              echo "API返回错误信息:"
+              jq -r '.error.message // "未知错误"' ../ai_response.json 2>/dev/null || cat ../ai_response.json
+              exit 1
+            fi
+            
+            # 检查响应中是否有code字段
+            CODE=$(jq -r '.code // "未返回code"' ../ai_response.json 2>/dev/null || echo "未返回code")
+            if [ "$CODE" != "0" ] && [ "$CODE" != "未返回code" ]; then
+              echo "讯飞星火API返回错误，错误代码: $CODE"
+              echo "错误信息: $(jq -r '.message // "未知错误"' ../ai_response.json 2>/dev/null || echo "未知错误")"
+              exit 1
+            fi
+            
+            # 尝试两种可能的响应格式提取内容
+            if jq -e '.choices[0].message.content' ../ai_response.json > /dev/null 2>&1; then
+              # 标准OpenAI格式
+              jq -r '.choices[0].message.content' ../ai_response.json > Dockerfile.raw
+            elif jq -e '.payload.choices.text[0].content' ../ai_response.json > /dev/null 2>&1; then
+              # 讯飞星火可能的另一种格式
+              jq -r '.payload.choices.text[0].content' ../ai_response.json > Dockerfile.raw
+            else
+              # 如果上面都失败，尝试直接提取所有文本内容
+              cat ../ai_response.json > Dockerfile.raw
+            fi
+            
+            # 彻底清理Dockerfile内容，移除所有markdown格式和无效内容
+            echo "清理Dockerfile格式..."
+            # 临时文件用于处理
+            cat Dockerfile.raw | grep -v '^\s*```' | grep -v '^\s*$' > Dockerfile.tmp
+            
+            # 检查是否包含FROM指令
+            if grep -q "^FROM" Dockerfile.tmp; then
+              # 提取有效Dockerfile内容 - 确保只包含有效指令
+              echo "提取有效Dockerfile内容..."
+              grep -E "^(FROM|COPY|ADD|RUN|WORKDIR|ENV|ARG|EXPOSE|CMD|ENTRYPOINT|VOLUME|USER|ONBUILD|STOPSIGNAL|HEALTHCHECK|SHELL)" Dockerfile.tmp > Dockerfile
+            else
+              # 创建基本Dockerfile
+              echo "未找到有效的Dockerfile指令，创建基本Dockerfile..."
+              echo "FROM node:14-alpine" > Dockerfile
+              echo "WORKDIR /app" >> Dockerfile
+              echo "COPY . ." >> Dockerfile
+              echo "RUN if [ -f \"package.json\" ]; then npm install; fi" >> Dockerfile
+              echo "CMD [\"npm\", \"start\"]" >> Dockerfile
+            fi
+            
+            echo "生成的Dockerfile内容:"
+            cat Dockerfile
+            
+            # 验证Dockerfile
+            echo "验证Dockerfile..."
+            # 检查是否存在循环依赖等问题
+            docker buildx build -t dockerfile-validation-test . > ../dockerfile_validation.log 2>&1
+            
+            # 检查构建是否成功
+            if [ $? -eq 0 ]; then
+              echo "Dockerfile验证通过！"
+              DOCKERFILE_VALID=true
+              break
+            else
+              echo "Dockerfile验证失败，查找错误原因..."
+              
+              # 提取错误信息
+              ERROR_MSG=$(grep -A 5 "ERROR:" ../dockerfile_validation.log | head -6)
+              echo "$ERROR_MSG" > ../dockerfile_error.txt
+              echo "错误信息: $ERROR_MSG"
+              
+              # 如果达到最大重试次数，则放弃
+              if [ $RETRY_COUNT -ge $MAX_RETRIES ]; then
+                echo "达到最大重试次数($MAX_RETRIES)，无法生成有效的Dockerfile"
+                echo "将使用基本的Dockerfile作为后备..."
+                # 创建基本的后备Dockerfile
+                echo "FROM node:14-alpine" > Dockerfile
+                echo "WORKDIR /app" >> Dockerfile
+                echo "COPY package*.json ./" >> Dockerfile
+                echo "RUN npm install --production" >> Dockerfile
+                echo "COPY . ." >> Dockerfile
+                echo "CMD [\"npm\", \"start\"]" >> Dockerfile
+              fi
+            fi
+          done
           
           echo "最终生成的Dockerfile:"
           cat Dockerfile
@@ -357,20 +413,44 @@ jobs:
               echo "FROM node:${NODE_VERSION}-alpine AS builder" >> Dockerfile.new
               echo "WORKDIR /app" >> Dockerfile.new
               echo "COPY package*.json ./" >> Dockerfile.new
-              echo "RUN npm ci --only=production" >> Dockerfile.new
+              echo "RUN npm ci --only=production || npm install --production" >> Dockerfile.new
               echo "COPY . ." >> Dockerfile.new
               echo "" >> Dockerfile.new
               echo "# 运行阶段" >> Dockerfile.new
               echo "FROM node:${NODE_VERSION}-alpine" >> Dockerfile.new
               echo "WORKDIR /app" >> Dockerfile.new
-              echo "COPY --from=builder /app/package.json ./" >> Dockerfile.new
+              echo "COPY --from=builder /app/package*.json ./" >> Dockerfile.new
               echo "COPY --from=builder /app/node_modules ./node_modules" >> Dockerfile.new
-              echo "COPY --from=builder /app/. ./" >> Dockerfile.new
+              echo "# 只复制需要的文件，避免复制node_modules等" >> Dockerfile.new
+              echo "COPY --from=builder /app/src ./src" >> Dockerfile.new
+              echo "COPY --from=builder /app/public ./public 2>/dev/null || true" >> Dockerfile.new
+              echo "COPY --from=builder /app/*.js ./ 2>/dev/null || true" >> Dockerfile.new
+              echo "COPY --from=builder /app/*.json ./ 2>/dev/null || true" >> Dockerfile.new
               echo "" >> Dockerfile.new
               echo "# 设置运行命令" >> Dockerfile.new
               echo "CMD [\"npm\", \"start\"]" >> Dockerfile.new
 
               mv Dockerfile.new Dockerfile
+            else
+              # 如果已有多阶段构建，检查是否有循环依赖
+              echo "检查多阶段构建是否有循环依赖..."
+              # 查找COPY --from=N指令中的N是否定义清晰
+              # 创建临时文件进行修复
+              cp Dockerfile Dockerfile.tmp
+              
+              # 获取阶段数量
+              STAGE_COUNT=$(grep -c "^FROM" Dockerfile)
+              
+              # 如果没有明确的阶段命名，给第一个阶段添加名称
+              if ! grep -q "FROM .* AS " Dockerfile; then
+                # 给第一个FROM添加AS builder
+                sed -i '0,/^FROM/s/^FROM \(.*\)$/FROM \1 AS builder/' Dockerfile.tmp
+                # 将所有--from=0替换为--from=builder
+                sed -i 's/COPY --from=0/COPY --from=builder/g' Dockerfile.tmp
+              fi
+              
+              # 应用修改
+              mv Dockerfile.tmp Dockerfile
             fi
           fi
           

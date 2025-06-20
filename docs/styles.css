@@ -9,10 +9,14 @@
   --pending-bg: #fff3cd;
   --pending-color: #856404;
   --border-color: #ddd;
+  --border-light: #eee;
   --bg-light: #f8f9fa;
   --bg-dark: #343a40;
   --text-light: #f8f9fa;
   --text-dark: #333;
+  --text-muted: #6c757d;
+  --text-required: #e74c3c;
+  --text-optional: #7f8c8d;
 }
 
 * {
@@ -61,14 +65,61 @@ h3 {
   margin-bottom: 2rem;
 }
 
+.form-section {
+  margin-bottom: 2rem;
+  padding-bottom: 1.5rem;
+  border-bottom: 1px solid var(--border-light);
+}
+
+.form-section h3 {
+  color: var(--secondary-color);
+  margin-bottom: 1rem;
+  font-size: 1.2rem;
+}
+
+.form-section:last-of-type {
+  border-bottom: none;
+}
+
 .form-group {
   margin-bottom: 1.5rem;
+}
+
+.checkbox-group {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.checkbox-group input {
+  width: auto;
+}
+
+.checkbox-group label {
+  margin-bottom: 0;
+  font-weight: normal;
 }
 
 label {
   display: block;
   margin-bottom: 0.5rem;
   font-weight: bold;
+}
+
+.required {
+  color: var(--text-required);
+}
+
+.optional {
+  color: var(--text-optional);
+  font-weight: normal;
+  font-size: 0.9rem;
+}
+
+.hint {
+  color: var(--text-muted);
+  font-size: 0.85rem;
+  margin-top: 0.5rem;
 }
 
 input,
@@ -78,6 +129,10 @@ select {
   border: 1px solid var(--border-color);
   border-radius: 4px;
   font-size: 1rem;
+}
+
+input[type="password"] {
+  font-family: monospace;
 }
 
 button {

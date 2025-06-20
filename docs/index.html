@@ -18,34 +18,86 @@
     <div class="card">
       <h2>提交构建</h2>
       <form id="buildForm">
-        <div class="form-group">
-          <label for="repoUrl">代码仓库 URL:</label>
-          <input type="text" id="repoUrl" placeholder="例如: https://github.com/username/repo" required>
+        <!-- 仓库信息 -->
+        <div class="form-section">
+          <h3>代码仓库信息</h3>
+          <div class="form-group">
+            <label for="repoUrl">代码仓库 URL: <span class="required">*</span></label>
+            <input type="text" id="repoUrl" placeholder="例如: https://github.com/username/repo" required>
+          </div>
+
+          <div class="form-group">
+            <label for="branch">分支:</label>
+            <input type="text" id="branch" value="main">
+          </div>
+
+          <div class="form-group">
+            <label for="repoToken">仓库访问令牌: <span class="optional">(私有仓库需要)</span></label>
+            <input type="password" id="repoToken" placeholder="私有仓库的个人访问令牌">
+            <div class="hint">此令牌用于克隆私有仓库，不会被保存</div>
+          </div>
         </div>
 
-        <div class="form-group">
-          <label for="branch">分支:</label>
-          <input type="text" id="branch" value="main">
+        <!-- 镜像信息 -->
+        <div class="form-section">
+          <h3>镜像信息</h3>
+          <div class="form-group">
+            <label for="imageName">镜像名称: <span class="required">*</span></label>
+            <input type="text" id="imageName" placeholder="例如: myusername/myapp" required>
+          </div>
+
+          <div class="form-group">
+            <label for="imageTag">镜像标签:</label>
+            <input type="text" id="imageTag" value="latest">
+          </div>
+
+          <div class="form-group">
+            <label for="registry">镜像仓库地址:</label>
+            <input type="text" id="registry" value="docker.io">
+          </div>
         </div>
 
-        <div class="form-group">
-          <label for="imageName">镜像名称:</label>
-          <input type="text" id="imageName" placeholder="例如: myusername/myapp" required>
+        <!-- Docker凭据 -->
+        <div class="form-section">
+          <h3>Docker凭据</h3>
+          <div class="form-group">
+            <label for="dockerUsername">Docker用户名: <span class="required">*</span></label>
+            <input type="text" id="dockerUsername" placeholder="Docker仓库用户名" required>
+          </div>
+
+          <div class="form-group">
+            <label for="dockerPassword">Docker密码/令牌: <span class="required">*</span></label>
+            <input type="password" id="dockerPassword" placeholder="Docker仓库密码或访问令牌" required>
+            <div class="hint">此密码/令牌用于推送镜像，不会被保存</div>
+          </div>
         </div>
 
-        <div class="form-group">
-          <label for="imageTag">镜像标签:</label>
-          <input type="text" id="imageTag" value="latest">
+        <!-- API设置（可选） -->
+        <div class="form-section">
+          <h3>API设置 <span class="optional">(可选)</span></h3>
+          <div class="form-group">
+            <label for="apiEndpoint">API端点:</label>
+            <input type="text" id="apiEndpoint" placeholder="https://your-backend-api.com/api">
+            <div class="hint">如果不填写，将直接调用GitHub Actions而不通过后端服务</div>
+          </div>
+
+          <div class="form-group">
+            <label for="githubToken">GitHub令牌: <span class="optional">(直接调用GitHub Actions需要)</span></label>
+            <input type="password" id="githubToken" placeholder="GitHub个人访问令牌">
+            <div class="hint">用于直接触发GitHub Actions工作流，不会被保存</div>
+          </div>
+
+          <div class="form-group">
+            <label for="callbackUrl">回调URL: <span class="optional">(可选)</span></label>
+            <input type="text" id="callbackUrl" placeholder="构建完成后通知的URL">
+            <div class="hint">构建完成后通知的URL，不填写则不发送通知</div>
+          </div>
         </div>
 
-        <div class="form-group">
-          <label for="registry">镜像仓库地址:</label>
-          <input type="text" id="registry" value="docker.io">
-        </div>
-
-        <div class="form-group">
-          <label for="apiEndpoint">API 端点:</label>
-          <input type="text" id="apiEndpoint" placeholder="https://your-backend-api.com/api">
+        <!-- 记住选项 -->
+        <div class="form-group checkbox-group">
+          <input type="checkbox" id="rememberNonSensitive" checked>
+          <label for="rememberNonSensitive">记住非敏感信息(仓库URL、镜像名称等)</label>
         </div>
 
         <button type="submit">提交构建请求</button>

@@ -24,6 +24,15 @@ on:
       callback_url:
         description: '回调通知URL'
         required: false
+      docker_username:
+        description: 'Docker仓库用户名'
+        required: true
+      docker_password:
+        description: 'Docker仓库密码/令牌'
+        required: true
+      repo_token:
+        description: '仓库访问令牌(私有仓库需要)'
+        required: false
 
 jobs:
   build:
@@ -40,12 +49,29 @@ jobs:
       - name: 克隆源代码
         run: |
           repo_url="${{ github.event.inputs.repo_url }}"
-          # 处理Gitee链接
-          if [[ $repo_url == *gitee.com* ]]; then
-            git clone --depth 1 -b ${{ github.event.inputs.branch }} $repo_url src
+          repo_token="${{ github.event.inputs.repo_token }}"
+          branch="${{ github.event.inputs.branch }}"
+          
+          # 处理私有仓库的身份验证
+          if [ -n "$repo_token" ]; then
+            # GitHub 仓库
+            if [[ $repo_url == *github.com* ]]; then
+              auth_repo_url=$(echo $repo_url | sed "s/https:\/\//https:\/\/$repo_token@/")
+              git clone --depth 1 -b $branch $auth_repo_url src
+            
+            # Gitee 仓库
+            elif [[ $repo_url == *gitee.com* ]]; then
+              auth_repo_url=$(echo $repo_url | sed "s/https:\/\//https:\/\/$repo_token@/")
+              git clone --depth 1 -b $branch $auth_repo_url src
+            
+            else
+              echo "不支持的仓库类型，但尝试使用令牌进行克隆"
+              auth_repo_url=$(echo $repo_url | sed "s/https:\/\//https:\/\/$repo_token@/")
+              git clone --depth 1 -b $branch $auth_repo_url src
+            fi
           else
-            # 处理GitHub链接
-            git clone --depth 1 -b ${{ github.event.inputs.branch }} $repo_url src
+            # 公开仓库，无需令牌
+            git clone --depth 1 -b $branch $repo_url src
           fi
         shell: bash
 
@@ -56,8 +82,8 @@ jobs:
         uses: docker/login-action@v2
         with:
           registry: ${{ github.event.inputs.registry }}
-          username: ${{ secrets.DOCKER_USERNAME }}
-          password: ${{ secrets.DOCKER_PASSWORD }}
+          username: ${{ github.event.inputs.docker_username }}
+          password: ${{ github.event.inputs.docker_password }}
 
       - name: 设置 Buildpacks
         uses: buildpacks/github-actions/setup-pack@v5.0.0
@@ -73,9 +99,8 @@ jobs:
       - name: 通知构建完成
         if: ${{ success() && github.event.inputs.callback_url != '' }}
         run: |
-          curl -X POST ${{ github.event.inputs.callback_url || secrets.BACKEND_NOTIFY_URL }} \
+          curl -X POST ${{ github.event.inputs.callback_url }} \
             -H "Content-Type: application/json" \
-            -H "Authorization: Bearer ${{ secrets.BACKEND_API_KEY }}" \
             -d '{
               "status": "success",
               "image": "${{ github.event.inputs.registry }}/${{ github.event.inputs.image_name }}:${{ github.event.inputs.image_tag }}",
@@ -88,9 +113,8 @@ jobs:
       - name: 通知构建失败
         if: ${{ failure() && github.event.inputs.callback_url != '' }}
         run: |
-          curl -X POST ${{ github.event.inputs.callback_url || secrets.BACKEND_NOTIFY_URL }} \
+          curl -X POST ${{ github.event.inputs.callback_url }} \
             -H "Content-Type: application/json" \
-            -H "Authorization: Bearer ${{ secrets.BACKEND_API_KEY }}" \
             -d '{
               "status": "failed",
               "repo_url": "${{ github.event.inputs.repo_url }}",

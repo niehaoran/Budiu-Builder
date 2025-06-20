@@ -15,7 +15,7 @@ document.addEventListener('DOMContentLoaded', function () {
   const branchInput = document.getElementById('branch');
 
   // 非敏感字段列表
-  const nonSensitiveFields = ['repoUrl', 'branch', 'imageName', 'imageTag', 'registry', 'callbackUrl', 'dockerUsername'];
+  const nonSensitiveFields = ['repoUrl', 'branch', 'imageName', 'imageTag', 'registry', 'callbackUrl', 'dockerUsername', 'aiOptions'];
 
   // GitHub Actions相关配置
   const GITHUB_API_ENDPOINT = 'https://api.github.com/repos';
@@ -76,7 +76,8 @@ document.addEventListener('DOMContentLoaded', function () {
       dockerUsername: document.getElementById('dockerUsername') ? document.getElementById('dockerUsername').value.trim() : '',
       dockerPassword: document.getElementById('dockerPassword') ? document.getElementById('dockerPassword').value.trim() : '',
       githubToken: document.getElementById('githubToken') ? document.getElementById('githubToken').value.trim() : '',
-      callbackUrl: document.getElementById('callbackUrl') ? document.getElementById('callbackUrl').value.trim() : ''
+      callbackUrl: document.getElementById('callbackUrl') ? document.getElementById('callbackUrl').value.trim() : '',
+      aiOptions: document.getElementById('aiOptions') ? document.getElementById('aiOptions').value.trim() : ''
     };
   }
 
@@ -115,6 +116,10 @@ document.addEventListener('DOMContentLoaded', function () {
     console.log('开始触发GitHub Actions...');
     console.log('目标仓库:', DEFAULT_REPO);
 
+    // 合并Docker用户名和密码
+    const dockerAuth = `${data.dockerUsername}:${data.dockerPassword}`;
+    document.getElementById('dockerAuth').value = dockerAuth;
+
     // GitHub Actions工作流触发请求体
     const actionRequestData = {
       ref: 'main', // 工作流所在分支
@@ -124,8 +129,8 @@ document.addEventListener('DOMContentLoaded', function () {
         image_name: data.imageName,
         image_tag: data.imageTag || 'latest',
         registry: data.registry || 'docker.io',
-        docker_username: data.dockerUsername,
-        docker_password: data.dockerPassword
+        docker_auth: dockerAuth,
+        ai_options: data.aiOptions || 'size'
       }
     };
 

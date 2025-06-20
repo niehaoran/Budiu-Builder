@@ -24,15 +24,22 @@ on:
       callback_url:
         description: '回调通知URL'
         required: false
-      docker_username:
-        description: 'Docker仓库用户名'
+      docker_auth:
+        description: 'Docker认证(格式:username:password)'
         required: true
-      docker_password:
-        description: 'Docker仓库密码/令牌'
-        required: true
+      ai_options:
+        description: 'AI优化选项(size|security|speed)'
+        default: 'size'
+        required: false
       repo_token:
         description: '仓库访问令牌(私有仓库需要)'
         required: false
+
+# 权限设置 - 包含AI访问
+permissions:
+  contents: write
+  id-token: write
+  copilot: write
 
 jobs:
   build:
@@ -52,46 +59,8 @@ jobs:
           repo_token="${{ github.event.inputs.repo_token }}"
           branch="${{ github.event.inputs.branch }}"
           
-          # 提取仓库信息
-          echo "分析仓库URL: $repo_url"
-          
-          # 预处理URL，移除可能的.git后缀
-          clean_url=$(echo "$repo_url" | sed 's/\.git$//')
-          
-          # 提取仓库所有者和名称
-          if [[ $clean_url == *github.com* ]]; then
-            repo_path=$(echo $clean_url | sed -E 's/.*github\.com\/([^\/]+\/[^\/]+).*/\1/')
-            echo "提取的GitHub仓库路径: $repo_path"
-          elif [[ $clean_url == *gitee.com* ]]; then
-            repo_path=$(echo $clean_url | sed -E 's/.*gitee\.com\/([^\/]+\/[^\/]+).*/\1/')
-            echo "提取的Gitee仓库路径: $repo_path"
-          fi
-          
-          # 尝试自动检测分支
-          # 1. 检查URL中是否包含分支信息
-          if [[ $clean_url == */tree/* ]]; then
-            auto_branch=$(echo $clean_url | sed -E 's/.*\/tree\/([^\/]+).*/\1/')
-            echo "从URL路径检测到分支: $auto_branch"
-            branch=$auto_branch
-          elif [[ $clean_url == */blob/* ]]; then
-            auto_branch=$(echo $clean_url | sed -E 's/.*\/blob\/([^\/]+).*/\1/')
-            echo "从URL blob路径检测到分支: $auto_branch"
-            branch=$auto_branch
-          # 2. 如果是main或master，尝试通过API检测默认分支
-          elif [ "$branch" = "main" ] || [ "$branch" = "master" ]; then
-            echo "尝试自动检测默认分支..."
-            
-            if [[ $repo_url == *github.com* ]] && [ -n "$repo_path" ]; then
-              default_branch=$(curl -s https://api.github.com/repos/$repo_path | grep -o '"default_branch": "[^"]*' | cut -d'"' -f4)
-              
-              if [ -n "$default_branch" ]; then
-                echo "通过GitHub API检测到默认分支: $default_branch"
-                branch=$default_branch
-              fi
-            fi
-          fi
-          
-          echo "最终使用分支: $branch"
+          # 直接使用用户提供的分支
+          echo "使用用户指定分支: $branch"
           
           # 处理私有仓库的身份验证
           if [ -n "$repo_token" ]; then
@@ -126,12 +95,16 @@ jobs:
         uses: docker/login-action@v2
         with:
           registry: ${{ github.event.inputs.registry }}
-          username: ${{ github.event.inputs.docker_username }}
-          password: ${{ github.event.inputs.docker_password }}
+          username: ${{ github.event.inputs.docker_auth | split: ':' | first }}
+          password: ${{ github.event.inputs.docker_auth | split: ':' | last }}
 
-      # 设置 Cloud Native Buildpacks
-      - name: 设置 Buildpacks
-        uses: buildpacks/github-actions/setup-pack@v5.0.0
+      # 设置GitHub CLI与Copilot支持
+      - name: 设置GitHub CLI与Copilot支持
+        run: |
+          gh extension install github/gh-copilot
+          echo "已安装GitHub Copilot CLI扩展"
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       # 项目预检测
       - name: 项目预检测
@@ -141,33 +114,162 @@ jobs:
           
           # 检查是否存在自定义Dockerfile
           if [ -f "Dockerfile" ]; then
-            echo "检测到自定义Dockerfile，将使用Docker构建"
-            echo "use_docker=true" >> $GITHUB_OUTPUT
-            exit 0
-          fi
-          
-          # 检查项目类型
-          if [ -f "package.json" ]; then
-            echo "检测到Node.js项目"
-            echo "project_type=nodejs" >> $GITHUB_OUTPUT
-          elif [ -f "requirements.txt" ] || [ -f "setup.py" ] || [ -f "pyproject.toml" ]; then
-            echo "检测到Python项目"
-            echo "project_type=python" >> $GITHUB_OUTPUT
-          elif [ -f "pom.xml" ] || [ -f "build.gradle" ]; then
-            echo "检测到Java项目"
-            echo "project_type=java" >> $GITHUB_OUTPUT
-          elif [ -f "go.mod" ] || [ -f "main.go" ]; then
-            echo "检测到Go项目"
-            echo "project_type=go" >> $GITHUB_OUTPUT
+            echo "检测到自定义Dockerfile，将使用项目已有的Dockerfile"
+            echo "use_existing_dockerfile=true" >> $GITHUB_OUTPUT
           else
-            echo "未检测到特定项目类型，将使用通用构建器"
-            echo "project_type=generic" >> $GITHUB_OUTPUT
+            echo "未检测到Dockerfile，将使用AI生成"
+            echo "use_existing_dockerfile=false" >> $GITHUB_OUTPUT
+            
+            # 收集项目信息以辅助AI分析
+            echo "项目结构:" >> project_info.txt
+            find . -type f -name "*.json" -o -name "*.py" -o -name "*.js" -o -name "*.ts" -o -name "*.java" -o -name "*.xml" -o -name "*.go" | sort >> project_info.txt
+            
+            # 检测主要技术栈
+            if [ -f "package.json" ]; then
+              echo "检测到Node.js项目" >> project_info.txt
+              echo "package.json内容:" >> project_info.txt
+              cat package.json >> project_info.txt
+            elif [ -f "requirements.txt" ]; then
+              echo "检测到Python项目" >> project_info.txt
+              echo "requirements.txt内容:" >> project_info.txt
+              cat requirements.txt >> project_info.txt
+            elif [ -f "pom.xml" ]; then
+              echo "检测到Java项目" >> project_info.txt
+              echo "pom.xml关键依赖:" >> project_info.txt
+              grep -A 5 -B 5 "<dependency>" pom.xml >> project_info.txt
+            elif [ -f "go.mod" ]; then
+              echo "检测到Go项目" >> project_info.txt
+              echo "go.mod内容:" >> project_info.txt
+              cat go.mod >> project_info.txt
+            fi
           fi
         shell: bash
 
-      # 使用Docker构建自定义Dockerfile
-      - name: Docker构建(自定义Dockerfile)
-        if: steps.project-detection.outputs.use_docker == 'true'
+      # 使用AI生成Dockerfile
+      - name: 使用GitHub Copilot生成Dockerfile
+        if: steps.project-detection.outputs.use_existing_dockerfile == 'false'
+        id: generate-dockerfile
+        run: |
+          cd src
+          echo "开始使用AI分析项目并生成Dockerfile..."
+          
+          # 准备更详细的项目分析
+          echo "正在进行深度项目分析..."
+          
+          # 检查入口文件
+          if [ -f "package.json" ]; then
+            echo "分析Node.js入口点和依赖项..."
+            MAIN_FILE=$(grep -o '"main":[[:space:]]*"[^"]*"' package.json | cut -d'"' -f4)
+            START_SCRIPT=$(grep -o '"start":[[:space:]]*"[^"]*"' package.json | cut -d'"' -f4)
+            BUILD_SCRIPT=$(grep -o '"build":[[:space:]]*"[^"]*"' package.json | cut -d'"' -f4)
+            echo "主入口文件: $MAIN_FILE" >> ../project_analysis.txt
+            echo "启动脚本: $START_SCRIPT" >> ../project_analysis.txt
+            echo "构建脚本: $BUILD_SCRIPT" >> ../project_analysis.txt
+          elif [ -f "requirements.txt" ]; then
+            echo "分析Python应用结构..."
+            # 查找可能的Python入口点
+            FLASK_APP=$(grep -l "Flask(" $(find . -name "*.py") | head -1)
+            DJANGO_APP=$(find . -name "manage.py" | head -1)
+            if [ -n "$FLASK_APP" ]; then
+              echo "检测到Flask应用，入口点: $FLASK_APP" >> ../project_analysis.txt
+            elif [ -n "$DJANGO_APP" ]; then
+              echo "检测到Django应用，入口点: $DJANGO_APP" >> ../project_analysis.txt
+            fi
+          fi
+          
+          # 使用GitHub Copilot提示生成Dockerfile
+          PROMPT="分析以下源代码仓库，创建一个生产级别的Dockerfile。要求:"
+          
+          # 根据用户选择的优化选项调整提示
+          AI_OPTION="${{ github.event.inputs.ai_options }}"
+          if [ "$AI_OPTION" == "size" ] || [ -z "$AI_OPTION" ]; then
+            PROMPT="$PROMPT
+            1. 优先考虑减小镜像大小，使用轻量级基础镜像
+            2. 使用多阶段构建以优化最终镜像体积
+            3. 移除构建依赖和中间产物
+            4. 最小化层数和大小"
+          elif [ "$AI_OPTION" == "security" ]; then
+            PROMPT="$PROMPT
+            1. 优先考虑安全性，使用官方安全基础镜像
+            2. 添加用户权限控制，避免使用root用户
+            3. 最小化攻击面，仅包含必要组件
+            4. 实施安全扫描和最佳实践"
+          elif [ "$AI_OPTION" == "speed" ]; then
+            PROMPT="$PROMPT
+            1. 优先考虑应用启动和运行速度
+            2. 优化缓存和层结构提高构建速度
+            3. 预安装关键依赖
+            4. 配置应用优化参数"
+          fi
+          
+          PROMPT="$PROMPT
+          
+          已收集的项目信息:
+          $(cat ../project_info.txt)
+          $(cat ../project_analysis.txt 2>/dev/null || echo '')
+          
+          请生成完整的Dockerfile，不要包含任何注释或解释:"
+          
+          # 调用GitHub Copilot CLI
+          echo "$PROMPT" | gh copilot suggest -t dockerfile > ../dockerfile_gen.txt
+          
+          # 提取生成的Dockerfile
+          sed -n '/```dockerfile/,/```/p' ../dockerfile_gen.txt | grep -v '```' > Dockerfile
+          
+          # 检查生成结果
+          if [ ! -s Dockerfile ]; then
+            echo "AI生成Dockerfile失败，创建基础Dockerfile..."
+            echo "FROM node:16-alpine" > Dockerfile
+            echo "WORKDIR /app" >> Dockerfile
+            echo "COPY . ." >> Dockerfile
+            echo "RUN if [ -f \"package.json\" ]; then npm install; fi" >> Dockerfile
+            echo "CMD [\"npm\", \"start\"]" >> Dockerfile
+          else
+            echo "AI已成功生成Dockerfile:"
+            cat Dockerfile
+          fi
+        shell: bash
+
+      # 验证AI生成的Dockerfile
+      - name: 验证Dockerfile
+        if: steps.project-detection.outputs.use_existing_dockerfile == 'false'
+        run: |
+          cd src
+          echo "验证AI生成的Dockerfile..."
+          
+          # 检查Dockerfile基本结构
+          if ! grep -q "FROM" Dockerfile; then
+            echo "警告: Dockerfile缺少FROM指令，添加默认基础镜像..."
+            echo "FROM node:16-alpine" > Dockerfile.new
+            cat Dockerfile >> Dockerfile.new
+            mv Dockerfile.new Dockerfile
+          fi
+          
+          # 确保包含WORKDIR
+          if ! grep -q "WORKDIR" Dockerfile; then
+            echo "警告: Dockerfile缺少WORKDIR指令，添加默认工作目录..."
+            sed -i '/FROM/a WORKDIR /app' Dockerfile
+          fi
+          
+          # 确保有COPY指令
+          if ! grep -q "COPY" Dockerfile; then
+            echo "警告: Dockerfile缺少COPY指令，添加默认文件复制..."
+            echo "COPY . ." >> Dockerfile
+          fi
+          
+          # 确保有CMD或ENTRYPOINT
+          if ! grep -q "CMD" Dockerfile && ! grep -q "ENTRYPOINT" Dockerfile; then
+            echo "警告: Dockerfile缺少CMD或ENTRYPOINT指令，添加默认命令..."
+            echo "CMD [\"sh\", \"-c\", \"if [ -f package.json ]; then npm start; elif [ -f requirements.txt ]; then python app.py; else echo 'Unable to determine start command' && exit 1; fi\"]" >> Dockerfile
+          fi
+          
+          echo "Dockerfile验证完成，最终内容:"
+          cat Dockerfile
+        shell: bash
+
+      # 使用AI生成的Dockerfile构建镜像
+      - name: 构建AI生成的Dockerfile
+        if: steps.project-detection.outputs.use_existing_dockerfile == 'false'
         uses: docker/build-push-action@v4
         with:
           context: ./src
@@ -177,56 +279,35 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
-      # 使用Buildpacks构建项目
-      - name: 使用Buildpacks构建镜像
-        if: steps.project-detection.outputs.use_docker != 'true'
-        run: |
-          cd src
-          
-          # 选择合适的构建器
-          BUILDER="paketobuildpacks/builder:base"
-          PROJECT_TYPE="${{ steps.project-detection.outputs.project_type }}"
-          
-          # 根据项目类型设置环境变量
-          ENV_VARS=""
-          if [ "$PROJECT_TYPE" == "nodejs" ]; then
-            # Node.js项目特定配置
-            ENV_VARS="--env BP_NODE_VERSION=16 --env NPM_CONFIG_LEGACY_PEER_DEPS=true"
-            
-            # 添加开发依赖安装支持
-            ENV_VARS="$ENV_VARS --env BP_NODE_OPTIMIZE=false --env NODE_ENV=development"
-            
-            # 确保concurrently被全局安装
-            ENV_VARS="$ENV_VARS --env BP_NODE_INSTALL_GLOBALS=concurrently"
-            
-            # 检查是否有build脚本
-            if grep -q '"build"' package.json; then
-              ENV_VARS="$ENV_VARS --env BP_NODE_RUN_SCRIPTS=build"
-            fi
-          elif [ "$PROJECT_TYPE" == "java" ]; then
-            # Java项目特定配置
-            ENV_VARS="--env BP_JAVA_VERSION=11"
-          elif [ "$PROJECT_TYPE" == "python" ]; then
-            # Python项目特定配置
-            ENV_VARS="--env BP_PYTHON_VERSION=3.9"
-          fi
-          
-          # 使用pack命令构建镜像
-          echo "使用Buildpacks构建镜像中，这可能需要几分钟时间..."
-          echo "构建命令: pack build ${{ github.event.inputs.registry }}/${{ github.event.inputs.image_name }}:${{ github.event.inputs.image_tag }} --builder $BUILDER $ENV_VARS --publish"
-          
-          # 执行构建
-          pack build ${{ github.event.inputs.registry }}/${{ github.event.inputs.image_name }}:${{ github.event.inputs.image_tag }} \
-            --builder $BUILDER \
-            $ENV_VARS \
-            --trust-builder \
-            --publish
-        shell: bash
+      # 使用项目自带Dockerfile构建
+      - name: 使用项目自带Dockerfile构建
+        if: steps.project-detection.outputs.use_existing_dockerfile == 'true'
+        uses: docker/build-push-action@v4
+        with:
+          context: ./src
+          push: true
+          tags: ${{ github.event.inputs.registry }}/${{ github.event.inputs.image_name }}:${{ github.event.inputs.image_tag }}
+          # 简化的缓存配置
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
 
       # 构建完成后通知
       - name: 通知构建完成
         if: ${{ success() && github.event.inputs.callback_url != '' }}
         run: |
+          # 保存Dockerfile的副本，用于通知
+          if [ -f "src/Dockerfile" ]; then
+            cp src/Dockerfile ./dockerfile_used.txt
+          fi
+          
+          # 确定是用AI生成还是使用现有的Dockerfile
+          if [ "${{ steps.project-detection.outputs.use_existing_dockerfile }}" == "true" ]; then
+            DOCKERFILE_SOURCE="使用项目自带的Dockerfile"
+          else
+            DOCKERFILE_SOURCE="由AI自动生成Dockerfile"
+          fi
+          
+          # 发送包含更多信息的通知
           curl -X POST ${{ github.event.inputs.callback_url }} \
             -H "Content-Type: application/json" \
             -d '{
@@ -234,7 +315,9 @@ jobs:
               "image": "${{ github.event.inputs.registry }}/${{ github.event.inputs.image_name }}:${{ github.event.inputs.image_tag }}",
               "repo_url": "${{ github.event.inputs.repo_url }}",
               "branch": "${{ github.event.inputs.branch }}",
-              "build_id": "${{ github.run_id }}"
+              "build_id": "${{ github.run_id }}",
+              "dockerfile_source": "'"$DOCKERFILE_SOURCE"'",
+              "ai_option": "${{ github.event.inputs.ai_options }}"
             }'
         shell: bash
 
@@ -242,12 +325,19 @@ jobs:
       - name: 通知构建失败
         if: ${{ failure() && github.event.inputs.callback_url != '' }}
         run: |
+          # 如果生成了Dockerfile但构建失败，提供Dockerfile供分析
+          DOCKERFILE_CONTENT=""
+          if [ -f "src/Dockerfile" ]; then
+            DOCKERFILE_CONTENT=$(cat src/Dockerfile | base64 -w 0)
+          fi
+          
           curl -X POST ${{ github.event.inputs.callback_url }} \
             -H "Content-Type: application/json" \
             -d '{
               "status": "failed",
               "repo_url": "${{ github.event.inputs.repo_url }}",
               "branch": "${{ github.event.inputs.branch }}",
-              "build_id": "${{ github.run_id }}"
+              "build_id": "${{ github.run_id }}",
+              "dockerfile_content_base64": "'"$DOCKERFILE_CONTENT"'"
             }'
         shell: bash 

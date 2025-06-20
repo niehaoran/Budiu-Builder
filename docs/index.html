@@ -71,6 +71,21 @@
             <label for="dockerPassword">Docker密码/令牌: <span class="required">*</span></label>
             <input type="password" id="dockerPassword" placeholder="Docker仓库密码或访问令牌" required>
             <div class="hint">此密码/令牌用于推送镜像，不会被保存</div>
+            <input type="hidden" id="dockerAuth">
+          </div>
+        </div>
+
+        <!-- AI构建选项 -->
+        <div class="form-section">
+          <h3>AI构建选项</h3>
+          <div class="form-group">
+            <label for="aiOptions">AI优化选项:</label>
+            <select id="aiOptions">
+              <option value="size" selected>优化镜像大小</option>
+              <option value="security">优化安全性</option>
+              <option value="speed">优化构建和运行速度</option>
+            </select>
+            <div class="hint">选择AI为Dockerfile优化的重点，将影响构建结果</div>
           </div>
         </div>
 

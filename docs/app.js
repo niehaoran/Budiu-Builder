@@ -11,6 +11,8 @@ document.addEventListener('DOMContentLoaded', function () {
   const imageUrlDisplay = document.getElementById('imageUrl');
   const refreshStatusButton = document.getElementById('refreshStatus');
   const rememberCheckbox = document.getElementById('rememberNonSensitive');
+  const repoUrlInput = document.getElementById('repoUrl');
+  const branchInput = document.getElementById('branch');
 
   // 非敏感字段列表
   const nonSensitiveFields = ['repoUrl', 'branch', 'imageName', 'imageTag', 'registry', 'callbackUrl', 'dockerUsername'];
@@ -22,6 +24,43 @@ document.addEventListener('DOMContentLoaded', function () {
 
   // 显示当前仓库配置
   console.log('当前配置的Actions仓库:', DEFAULT_REPO);
+
+  // 为仓库URL输入框添加变化监听器，自动提取分支名称
+  if (repoUrlInput) {
+    repoUrlInput.addEventListener('blur', function () {
+      const url = repoUrlInput.value.trim();
+      if (url && branchInput) {
+        const extractedBranch = extractBranchFromUrl(url);
+        if (extractedBranch) {
+          branchInput.value = extractedBranch;
+          console.log('从URL自动检测到分支:', extractedBranch);
+        }
+      }
+    });
+  }
+
+  // 从仓库URL中提取分支名
+  function extractBranchFromUrl(url) {
+    if (!url) return null;
+
+    // 检查URL是否包含分支信息
+    // 格式可能是：https://github.com/user/repo/tree/branch 或 /user/repo/tree/branch
+    const branchPatterns = [
+      /github\.com\/[^\/]+\/[^\/]+\/tree\/([^\/]+)/,  // GitHub /tree/branch 格式
+      /github\.com\/[^\/]+\/[^\/]+\/blob\/([^\/]+)/,  // GitHub /blob/branch 格式
+      /gitee\.com\/[^\/]+\/[^\/]+\/tree\/([^\/]+)/,   // Gitee /tree/branch 格式
+      /gitee\.com\/[^\/]+\/[^\/]+\/blob\/([^\/]+)/    // Gitee /blob/branch 格式
+    ];
+
+    for (const pattern of branchPatterns) {
+      const match = url.match(pattern);
+      if (match && match[1]) {
+        return match[1]; // 返回匹配到的分支名
+      }
+    }
+
+    return null; // 没有找到分支名，保留表单默认值
+  }
 
   // 恢复保存的非敏感表单数据
   loadSavedFormData();

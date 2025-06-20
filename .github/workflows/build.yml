@@ -39,7 +39,6 @@ on:
 permissions:
   contents: write
   id-token: write
-  copilot: write
 
 jobs:
   build:

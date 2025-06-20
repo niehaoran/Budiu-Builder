@@ -569,21 +569,18 @@ jobs:
               # 如果是重试，添加错误信息到提示中
               if [ -f "../dockerfile_error.txt" ]; then
                 ERROR_FEEDBACK=$(cat ../dockerfile_error.txt)
-                cat > ../retry_prompt.txt << 'EOL'
-上次生成的Dockerfile存在以下问题：
-
-$ERROR_FEEDBACK
-
-请根据以上错误信息修复Dockerfile。这是第 $RETRY_COUNT 次尝试，共有 $MAX_RETRIES 次机会。请确保:
-1. 解决所有报告的错误
-2. 确保所有COPY/ADD指令引用的文件确实存在
-3. 如果使用多阶段构建，确保阶段名称正确
-4. 根据项目类型提供正确的CMD或ENTRYPOINT指令
-EOL
-                # 替换变量
-                sed -i "s/\$ERROR_FEEDBACK/$ERROR_FEEDBACK/g" ../retry_prompt.txt
-                sed -i "s/\$RETRY_COUNT/$RETRY_COUNT/g" ../retry_prompt.txt
-                sed -i "s/\$MAX_RETRIES/$MAX_RETRIES/g" ../retry_prompt.txt
+                
+                # 使用多个echo命令替代heredoc
+                echo "上次生成的Dockerfile存在以下问题：" > ../retry_prompt.txt
+                echo "" >> ../retry_prompt.txt
+                echo "$ERROR_FEEDBACK" >> ../retry_prompt.txt
+                echo "" >> ../retry_prompt.txt
+                echo "请根据以上错误信息修复Dockerfile。这是第 $RETRY_COUNT 次尝试，共有 $MAX_RETRIES 次机会。请确保:" >> ../retry_prompt.txt
+                echo "1. 解决所有报告的错误" >> ../retry_prompt.txt
+                echo "2. 确保所有COPY/ADD指令引用的文件确实存在" >> ../retry_prompt.txt
+                echo "3. 如果使用多阶段构建，确保阶段名称正确" >> ../retry_prompt.txt
+                echo "4. 根据项目类型提供正确的CMD或ENTRYPOINT指令" >> ../retry_prompt.txt
+                
                 RETRY_PROMPT=$(cat ../retry_prompt.txt)
                 PROMPT="$PROMPT\n\n$RETRY_PROMPT"
               fi
@@ -596,20 +593,16 @@ EOL
             if [ -n "$BUILD_ERROR_FEEDBACK" ]; then
               echo "检测到构建错误，将错误信息提供给AI以重新生成Dockerfile..."
               
-              cat > ../build_error_prompt.txt << 'EOL'
-上次生成的Dockerfile构建失败，以下是错误信息和分析：
-
-$BUILD_ERROR_FEEDBACK
-
-请根据以上错误分析修复Dockerfile，确保它能够正确构建。特别注意：
-1. 确保使用正确的基础镜像和依赖安装命令
-2. 确保文件路径正确，COPY/ADD指令引用的所有文件都存在
-3. 提供正确的启动命令
-4. 如使用多阶段构建，确保阶段名称引用正确
-EOL
-              
-              # 替换变量
-              sed -i "s/\$BUILD_ERROR_FEEDBACK/$BUILD_ERROR_FEEDBACK/g" ../build_error_prompt.txt
+              # 使用多个echo命令替代heredoc
+              echo "上次生成的Dockerfile构建失败，以下是错误信息和分析：" > ../build_error_prompt.txt
+              echo "" >> ../build_error_prompt.txt
+              echo "$BUILD_ERROR_FEEDBACK" >> ../build_error_prompt.txt
+              echo "" >> ../build_error_prompt.txt
+              echo "请根据以上错误分析修复Dockerfile，确保它能够正确构建。特别注意：" >> ../build_error_prompt.txt
+              echo "1. 确保使用正确的基础镜像和依赖安装命令" >> ../build_error_prompt.txt
+              echo "2. 确保文件路径正确，COPY/ADD指令引用的所有文件都存在" >> ../build_error_prompt.txt
+              echo "3. 提供正确的启动命令" >> ../build_error_prompt.txt
+              echo "4. 如使用多阶段构建，确保阶段名称引用正确" >> ../build_error_prompt.txt
               
               # 将错误提示添加到prompt中
               cat ../build_error_prompt.txt >> ../prompt.txt

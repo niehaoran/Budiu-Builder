@@ -23,8 +23,6 @@ document.addEventListener('DOMContentLoaded', function () {
   // 显示当前仓库配置
   console.log('当前配置的Actions仓库:', DEFAULT_REPO);
 
-  // 已经配置好仓库，不需要检查和显示警告
-
   // 恢复保存的非敏感表单数据
   loadSavedFormData();
 

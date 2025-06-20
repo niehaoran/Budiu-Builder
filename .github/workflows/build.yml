@@ -146,6 +146,10 @@ jobs:
               echo "Next.js项目"
               cat > Dockerfile <<EOF
           FROM node:16-alpine AS builder
+          
+          # 安装git和其他必要工具
+          RUN apk add --no-cache git openssh
+          
           WORKDIR /app
           COPY . .
           RUN npm ci --legacy-peer-deps || npm install --legacy-peer-deps
@@ -168,6 +172,10 @@ jobs:
               echo "Nuxt.js项目"
               cat > Dockerfile <<EOF
           FROM node:16-alpine AS builder
+          
+          # 安装git和其他必要工具
+          RUN apk add --no-cache git openssh
+          
           WORKDIR /app
           COPY . .
           RUN npm ci --legacy-peer-deps || npm install --legacy-peer-deps
@@ -190,6 +198,10 @@ jobs:
               echo "React/Vue前端项目"
               cat > Dockerfile <<EOF
           FROM node:16-alpine AS builder
+          
+          # 安装git和其他必要工具
+          RUN apk add --no-cache git openssh
+          
           WORKDIR /app
           COPY package*.json ./
           RUN npm ci --legacy-peer-deps || npm install --legacy-peer-deps
@@ -219,6 +231,10 @@ jobs:
               echo "常规Node.js项目"
               cat > Dockerfile <<EOF
           FROM node:16-alpine
+          
+          # 安装git和其他必要工具
+          RUN apk add --no-cache git openssh
+          
           WORKDIR /app
           COPY package*.json ./
           RUN npm ci --legacy-peer-deps || npm install --legacy-peer-deps
@@ -235,6 +251,9 @@ jobs:
             
             cat > Dockerfile <<EOF
           FROM python:3.9-slim
+          
+          # 安装git和其他必要工具
+          RUN apt-get update && apt-get install -y git && apt-get clean
           
           WORKDIR /app
           
@@ -255,6 +274,10 @@ jobs:
             
             cat > Dockerfile <<EOF
           FROM maven:3.8-openjdk-11-slim AS builder
+          
+          # 安装git
+          RUN apt-get update && apt-get install -y git && apt-get clean
+          
           WORKDIR /app
           COPY . .
           RUN mvn package -DskipTests

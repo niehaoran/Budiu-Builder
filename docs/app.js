@@ -23,21 +23,7 @@ document.addEventListener('DOMContentLoaded', function () {
   // 显示当前仓库配置
   console.log('当前配置的Actions仓库:', DEFAULT_REPO);
 
-  // 检查是否需要配置仓库
-  if (DEFAULT_REPO === 'your-username/Budiu-Builder') {
-    console.warn('警告: 您需要更新app.js中的DEFAULT_REPO变量为您自己的仓库名称!');
-
-    // 显示警告信息在页面上
-    const warningDiv = document.createElement('div');
-    warningDiv.className = 'card warning';
-    warningDiv.innerHTML = `
-      <h3>⚠️ 配置警告</h3>
-      <p>您需要更新代码中的仓库信息才能使用此应用!</p>
-      <p>请修改 <code>docs/app.js</code> 文件中的 <code>DEFAULT_REPO</code> 变量为您自己的仓库路径。</p>
-      <p>格式: <code>'username/repository-name'</code></p>
-    `;
-    document.querySelector('main').insertBefore(warningDiv, buildForm.parentNode);
-  }
+  // 已经配置好仓库，不需要检查和显示警告
 
   // 恢复保存的非敏感表单数据
   loadSavedFormData();
@@ -45,12 +31,6 @@ document.addEventListener('DOMContentLoaded', function () {
   // 表单提交处理
   buildForm.addEventListener('submit', function (e) {
     e.preventDefault();
-
-    // 检查仓库配置
-    if (DEFAULT_REPO === 'your-username/Budiu-Builder') {
-      alert('请先在app.js中配置您的GitHub仓库信息!');
-      return;
-    }
 
     // 获取表单输入值
     const formData = getFormData();

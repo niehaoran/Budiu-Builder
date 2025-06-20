@@ -1,0 +1,100 @@
+name: Build and Deploy
+
+on:
+  workflow_dispatch:
+    inputs:
+      repo_url:
+        description: '代码仓库地址 (GitHub或Gitee)'
+        required: true
+      branch:
+        description: '分支名称'
+        default: 'main'
+        required: true
+      image_name:
+        description: '镜像名称'
+        required: true
+      image_tag:
+        description: '镜像标签'
+        default: 'latest'
+        required: true
+      registry:
+        description: '镜像仓库地址'
+        default: 'docker.io'
+        required: true
+      callback_url:
+        description: '回调通知URL'
+        required: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: 检查输入参数
+        run: |
+          echo "代码仓库: ${{ github.event.inputs.repo_url }}"
+          echo "分支: ${{ github.event.inputs.branch }}"
+          echo "镜像名称: ${{ github.event.inputs.image_name }}"
+          echo "镜像标签: ${{ github.event.inputs.image_tag }}"
+          echo "镜像仓库: ${{ github.event.inputs.registry }}"
+
+      - name: 克隆源代码
+        run: |
+          repo_url="${{ github.event.inputs.repo_url }}"
+          # 处理Gitee链接
+          if [[ $repo_url == *gitee.com* ]]; then
+            git clone --depth 1 -b ${{ github.event.inputs.branch }} $repo_url src
+          else
+            # 处理GitHub链接
+            git clone --depth 1 -b ${{ github.event.inputs.branch }} $repo_url src
+          fi
+        shell: bash
+
+      - name: 设置Docker Buildx
+        uses: docker/setup-buildx-action@v2
+
+      - name: 登录镜像仓库
+        uses: docker/login-action@v2
+        with:
+          registry: ${{ github.event.inputs.registry }}
+          username: ${{ secrets.DOCKER_USERNAME }}
+          password: ${{ secrets.DOCKER_PASSWORD }}
+
+      - name: 设置 Buildpacks
+        uses: buildpacks/github-actions/setup-pack@v5.0.0
+
+      - name: 使用Buildpacks构建镜像
+        run: |
+          cd src
+          pack build ${{ github.event.inputs.image_name }}:${{ github.event.inputs.image_tag }} \
+            --builder paketobuildpacks/builder:base \
+            --publish ${{ github.event.inputs.registry }}/${{ github.event.inputs.image_name }}:${{ github.event.inputs.image_tag }}
+        shell: bash
+
+      - name: 通知构建完成
+        if: ${{ success() && github.event.inputs.callback_url != '' }}
+        run: |
+          curl -X POST ${{ github.event.inputs.callback_url || secrets.BACKEND_NOTIFY_URL }} \
+            -H "Content-Type: application/json" \
+            -H "Authorization: Bearer ${{ secrets.BACKEND_API_KEY }}" \
+            -d '{
+              "status": "success",
+              "image": "${{ github.event.inputs.registry }}/${{ github.event.inputs.image_name }}:${{ github.event.inputs.image_tag }}",
+              "repo_url": "${{ github.event.inputs.repo_url }}",
+              "branch": "${{ github.event.inputs.branch }}",
+              "build_id": "${{ github.run_id }}"
+            }'
+        shell: bash
+
+      - name: 通知构建失败
+        if: ${{ failure() && github.event.inputs.callback_url != '' }}
+        run: |
+          curl -X POST ${{ github.event.inputs.callback_url || secrets.BACKEND_NOTIFY_URL }} \
+            -H "Content-Type: application/json" \
+            -H "Authorization: Bearer ${{ secrets.BACKEND_API_KEY }}" \
+            -d '{
+              "status": "failed",
+              "repo_url": "${{ github.event.inputs.repo_url }}",
+              "branch": "${{ github.event.inputs.branch }}",
+              "build_id": "${{ github.run_id }}"
+            }'
+        shell: bash 

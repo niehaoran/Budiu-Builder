@@ -193,6 +193,12 @@ jobs:
             # Node.js项目特定配置
             ENV_VARS="--env BP_NODE_VERSION=16 --env NPM_CONFIG_LEGACY_PEER_DEPS=true"
             
+            # 添加开发依赖安装支持
+            ENV_VARS="$ENV_VARS --env BP_NODE_OPTIMIZE=false --env NODE_ENV=development"
+            
+            # 确保concurrently被全局安装
+            ENV_VARS="$ENV_VARS --env BP_NODE_INSTALL_GLOBALS=concurrently"
+            
             # 检查是否有build脚本
             if grep -q '"build"' package.json; then
               ENV_VARS="$ENV_VARS --env BP_NODE_RUN_SCRIPTS=build"

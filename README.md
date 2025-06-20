@@ -1,15 +1,52 @@
 # Budiu-Builder
 
-Budiu-Builder是一个基于GitHub Actions的自动构建系统，用于将GitHub/Gitee仓库自动构建为Docker镜像并推送到指定的镜像仓库。
+自动化构建系统，将GitHub/Gitee仓库自动构建为Docker镜像并推送到指定仓库。
 
 ## 功能特点
 
-- 支持GitHub和Gitee代码仓库作为源代码
-- 支持公开和私有仓库（通过访问令牌）
-- 使用Buildpacks自动识别项目类型并构建Docker镜像
-- 支持推送到DockerHub或任意自定义镜像仓库
-- 构建完成后可选择性通知后端服务
-- 提供用户友好的Web界面，可部署在GitHub Pages上
+- 支持GitHub和Gitee仓库源
+- 全自动检测项目类型和依赖
+- 使用Cloud Native Buildpacks构建镜像
+- 自动推送到Docker Hub或其他镜像仓库
+- AI辅助自动生成Dockerfile (新功能!)
+
+## 使用方法
+
+### 方式一：使用Cloud Native Buildpacks全自动构建
+
+1. 进入Actions标签
+2. 选择"Build and Deploy"工作流
+3. 点击"Run workflow"
+4. 填入：
+   - 代码仓库地址
+   - 分支名称
+   - 镜像名称和标签
+   - 镜像仓库地址
+   - Docker仓库凭据
+
+### 方式二：使用AI自动生成Dockerfile (新功能!)
+
+如果你希望先生成Dockerfile以便检查或修改，可以：
+
+1. 进入Actions标签
+2. 选择"自动生成Dockerfile"工作流
+3. 点击"Run workflow"
+4. 填入：
+   - 代码仓库地址
+   - 分支名称
+
+系统将使用GitHub Copilot分析项目并生成适合的Dockerfile，然后提交回仓库。
+
+## 高级选项
+
+- 支持自定义回调通知URL
+- 支持私有仓库(需提供访问令牌)
+- 自动检测分支信息
+
+## 注意事项
+
+- 若项目已包含Dockerfile，会优先使用项目自带的Dockerfile
+- 构建过程中的日志可在Actions运行记录中查看
 
 ## 使用方法
 

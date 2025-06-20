@@ -1,0 +1,87 @@
+name: 自动生成Dockerfile
+
+on:
+  workflow_dispatch:
+    inputs:
+      repo_url:
+        description: '代码仓库地址 (GitHub或Gitee)'
+        required: true
+      branch:
+        description: '分支名称'
+        default: 'main'
+        required: true
+
+# 这个工作流需要GitHub Copilot访问权限
+permissions:
+  contents: write
+  id-token: write
+  copilot: write
+
+jobs:
+  generate-dockerfile:
+    runs-on: ubuntu-latest
+    steps:
+      - name: 检查输入参数
+        run: |
+          echo "代码仓库: ${{ github.event.inputs.repo_url }}"
+          echo "分支: ${{ github.event.inputs.branch }}"
+
+      - name: 克隆源代码
+        run: |
+          if [[ "${{ github.event.inputs.repo_url }}" == *github.com* ]]; then
+            git clone --depth 1 -b ${{ github.event.inputs.branch }} ${{ github.event.inputs.repo_url }} src
+          else
+            echo "暂时只支持GitHub仓库"
+            exit 1
+          fi
+
+      - name: 设置GitHub CLI与Copilot支持
+        run: |
+          gh extension install github/gh-copilot
+          echo "已安装GitHub Copilot CLI扩展"
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: 分析项目并生成Dockerfile
+        id: generate
+        run: |
+          cd src
+          echo "正在分析项目并使用GitHub Copilot生成Dockerfile..."
+          
+          # 使用gh copilot suggest命令生成Dockerfile
+          gh copilot suggest "分析本目录中的代码，创建一个适合该项目的Dockerfile。考虑项目的语言、框架和依赖。确保Dockerfile遵循最佳实践，使用多阶段构建减小镜像大小，并包含必要的安全配置。" > ../dockerfile_suggestion.txt
+          
+          # 提取建议内容中的Dockerfile部分
+          cat ../dockerfile_suggestion.txt | sed -n '/```dockerfile/,/```/p' | grep -v '```' > Dockerfile
+          
+          if [ -s Dockerfile ]; then
+            echo "已成功生成Dockerfile:"
+            cat Dockerfile
+          else
+            echo "生成Dockerfile失败，创建基础模板..."
+            echo "# 由GitHub Copilot生成的基础Dockerfile" > Dockerfile
+            echo "# 请根据项目需求修改" >> Dockerfile
+            echo "FROM alpine:latest" >> Dockerfile
+            echo "WORKDIR /app" >> Dockerfile
+            echo "COPY . ." >> Dockerfile
+            echo "CMD [\"echo\", \"请修改此Dockerfile\"]" >> Dockerfile
+          fi
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: 提交生成的Dockerfile
+        run: |
+          cd src
+          git config --global user.name "GitHub Actions Bot"
+          git config --global user.email "actions@github.com"
+          
+          if git diff --quiet --exit-code Dockerfile; then
+            echo "Dockerfile没有变化，跳过提交"
+          else
+            git add Dockerfile
+            git commit -m "自动生成Dockerfile [skip ci]"
+            git push origin ${{ github.event.inputs.branch }}
+            echo "成功提交自动生成的Dockerfile"
+          fi
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }} 

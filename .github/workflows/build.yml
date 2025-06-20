@@ -10,14 +10,6 @@ on:
         description: '分支名称'
         default: 'main'
         required: true
-      build_context:
-        description: '构建上下文和Dockerfile (格式: 上下文路径:Dockerfile路径，默认为.:Dockerfile)'
-        default: '.:Dockerfile'
-        required: false
-      build_args:
-        description: '构建参数 (格式: KEY1=VALUE1,KEY2=VALUE2)'
-        default: ''
-        required: false
       image_name:
         description: '镜像名称'
         required: true
@@ -29,86 +21,36 @@ on:
         description: '镜像仓库地址'
         default: 'docker.io'
         required: true
-      docker_auth:
-        description: 'Docker仓库认证 (格式: 用户名:密码)'
+      callback_url:
+        description: '回调通知URL'
+        required: false
+      docker_username:
+        description: 'Docker仓库用户名'
         required: true
-      advanced_options:
-        description: '高级选项 (格式: platforms=linux/amd64|callback_url=http://...|repo_token=xxx)'
-        default: 'platforms=linux/amd64'
+      docker_password:
+        description: 'Docker仓库密码/令牌'
+        required: true
+      repo_token:
+        description: '仓库访问令牌(私有仓库需要)'
         required: false
 
 jobs:
   build:
     runs-on: ubuntu-latest
     steps:
-      - name: 解析参数
-        id: parse_params
-        run: |
-          # 解析构建上下文和Dockerfile路径
-          build_context="${{ github.event.inputs.build_context }}"
-          IFS=':' read -r context_dir dockerfile_path <<< "$build_context"
-          # 默认值处理
-          context_dir=${context_dir:-'.'}
-          dockerfile_path=${dockerfile_path:-'Dockerfile'}
-          
-          echo "context_dir=$context_dir" >> $GITHUB_OUTPUT
-          echo "dockerfile_path=$dockerfile_path" >> $GITHUB_OUTPUT
-          
-          # 解析Docker认证信息
-          docker_auth="${{ github.event.inputs.docker_auth }}"
-          IFS=':' read -r docker_username docker_password <<< "$docker_auth"
-          echo "docker_username=$docker_username" >> $GITHUB_OUTPUT
-          # 密码不输出到日志
-          
-          # 解析高级选项
-          advanced="${{ github.event.inputs.advanced_options }}"
-          # 提取平台信息
-          if [[ $advanced == *"platforms="* ]]; then
-            platforms=$(echo "$advanced" | grep -oP 'platforms=\K[^|]*')
-          else
-            platforms="linux/amd64"
-          fi
-          echo "platforms=$platforms" >> $GITHUB_OUTPUT
-          
-          # 提取回调URL
-          if [[ $advanced == *"callback_url="* ]]; then
-            callback_url=$(echo "$advanced" | grep -oP 'callback_url=\K[^|]*')
-            echo "callback_url=$callback_url" >> $GITHUB_OUTPUT
-            echo "has_callback=true" >> $GITHUB_OUTPUT
-          else
-            echo "has_callback=false" >> $GITHUB_OUTPUT
-          fi
-          
-          # 提取仓库令牌
-          if [[ $advanced == *"repo_token="* ]]; then
-            repo_token=$(echo "$advanced" | grep -oP 'repo_token=\K[^|]*')
-            echo "repo_token=$repo_token" >> $GITHUB_OUTPUT
-            echo "has_repo_token=true" >> $GITHUB_OUTPUT
-          else
-            echo "has_repo_token=false" >> $GITHUB_OUTPUT
-          fi
-        shell: bash
-
       - name: 检查输入参数
         run: |
           echo "代码仓库: ${{ github.event.inputs.repo_url }}"
           echo "分支: ${{ github.event.inputs.branch }}"
-          echo "构建上下文: ${{ steps.parse_params.outputs.context_dir }}"
-          echo "Dockerfile路径: ${{ steps.parse_params.outputs.dockerfile_path }}"
           echo "镜像名称: ${{ github.event.inputs.image_name }}"
           echo "镜像标签: ${{ github.event.inputs.image_tag }}"
           echo "镜像仓库: ${{ github.event.inputs.registry }}"
-          echo "构建平台: ${{ steps.parse_params.outputs.platforms }}"
-        shell: bash
 
       - name: 克隆源代码
         run: |
           repo_url="${{ github.event.inputs.repo_url }}"
+          repo_token="${{ github.event.inputs.repo_token }}"
           branch="${{ github.event.inputs.branch }}"
-          
-          # 获取仓库令牌
-          has_repo_token="${{ steps.parse_params.outputs.has_repo_token }}"
-          repo_token="${{ steps.parse_params.outputs.repo_token }}"
           
           # 尝试自动检测默认分支
           if [ "$branch" = "main" ] || [ "$branch" = "master" ]; then
@@ -128,7 +70,7 @@ jobs:
           echo "最终使用分支: $branch"
           
           # 处理私有仓库的身份验证
-          if [ "$has_repo_token" == "true" ]; then
+          if [ -n "$repo_token" ]; then
             # GitHub 仓库
             if [[ $repo_url == *github.com* ]]; then
               auth_repo_url=$(echo $repo_url | sed "s/https:\/\//https:\/\/$repo_token@/")
@@ -155,29 +97,44 @@ jobs:
           fi
         shell: bash
 
-      - name: 检查是否存在Dockerfile
-        id: check_dockerfile
+      # 预分析源代码，检测构建脚本信息
+      - name: 分析源代码信息
+        id: analyze-source
         run: |
-          # 获取Dockerfile路径
-          context_dir="${{ steps.parse_params.outputs.context_dir }}"
-          dockerfile_path="${{ steps.parse_params.outputs.dockerfile_path }}"
-          full_dockerfile_path="src/$context_dir/$dockerfile_path"
+          cd src
           
-          # 兼容处理：如果dockerfile_path已经包含context_dir，不要重复添加
-          if [[ "$dockerfile_path" == "$context_dir"* ]]; then
-            full_dockerfile_path="src/$dockerfile_path"
-          fi
-          
-          echo "检查Dockerfile路径: $full_dockerfile_path"
-          
-          if [ -f "$full_dockerfile_path" ]; then
-            echo "Dockerfile找到: $full_dockerfile_path"
-            echo "dockerfile_exists=true" >> $GITHUB_OUTPUT
-            echo "dockerfile_path=$full_dockerfile_path" >> $GITHUB_OUTPUT
+          # 检测package.json中的构建脚本
+          if [ -f "package.json" ]; then
+            echo "检测Node.js项目中的构建脚本..."
+            
+            # 提取所有脚本命令
+            scripts=$(grep -o '"scripts": {[^}]*}' package.json || echo "")
+            
+            build_script=""
+            # 按优先顺序检测构建脚本
+            for script_name in "build" "build:prod" "build:production" "dist" "generate" "compile"; do
+              if echo "$scripts" | grep -q "\"$script_name\""; then
+                build_script=$script_name
+                echo "找到构建脚本: $build_script"
+                break
+              fi
+            done
+            
+            # 如果找不到构建脚本，但有start脚本
+            if [ -z "$build_script" ] && echo "$scripts" | grep -q "\"start\""; then
+              echo "未找到构建脚本，但存在start脚本，将使用start脚本"
+              build_script="start"
+            fi
+            
+            # 如果找到构建脚本，保存到输出
+            if [ -n "$build_script" ]; then
+              echo "build_script=$build_script" >> $GITHUB_OUTPUT
+            else
+              echo "build_script=none" >> $GITHUB_OUTPUT
+              echo "警告：未找到任何构建脚本，将直接拷贝文件构建静态网站"
+            fi
           else
-            echo "错误: Dockerfile未找到。请确保正确设置Dockerfile路径。"
-            echo "dockerfile_exists=false" >> $GITHUB_OUTPUT
-            exit 1
+            echo "build_script=none" >> $GITHUB_OUTPUT
           fi
         shell: bash
 
@@ -185,82 +142,287 @@ jobs:
       - name: 设置Docker Buildx
         uses: docker/setup-buildx-action@v2
         with:
-          platforms: ${{ steps.parse_params.outputs.platforms }}
-          buildkitd-flags: --debug
+          platforms: linux/amd64
 
       # 登录Docker仓库
       - name: 登录镜像仓库
         uses: docker/login-action@v2
         with:
           registry: ${{ github.event.inputs.registry }}
-          username: ${{ steps.parse_params.outputs.docker_username }}
-          password: ${{ steps.parse_params.outputs.docker_password }}
-      
-      # 处理构建参数
-      - name: 准备构建参数
-        id: build_params
+          username: ${{ github.event.inputs.docker_username }}
+          password: ${{ github.event.inputs.docker_password }}
+
+      # 生成合适的Dockerfile (如果项目中不存在)
+      - name: 检测项目类型并准备Dockerfile
+        id: prepare-dockerfile
         run: |
-          # 解析构建参数
-          build_args="${{ github.event.inputs.build_args }}"
-          context_dir="${{ steps.parse_params.outputs.context_dir }}"
+          cd src
           
-          # 构建上下文路径
-          full_context_path="src/$context_dir"
-          echo "context_path=$full_context_path" >> $GITHUB_OUTPUT
-          
-          # 转换构建参数为Docker Buildx可用格式
-          if [ -n "$build_args" ]; then
-            echo "构建参数: $build_args"
-            # 首先将逗号分隔转为换行符
-            build_args_list=$(echo $build_args | tr ',' '\n')
-            # 然后为每个参数构建--build-arg选项
-            build_args_formatted=""
-            while IFS= read -r arg; do
-              if [ -n "$arg" ]; then
-                build_args_formatted="$build_args_formatted --build-arg $arg"
-              fi
-            done <<< "$build_args_list"
-            echo "构建参数格式化完成: $build_args_formatted"
-            echo "build_args=$build_args_formatted" >> $GITHUB_OUTPUT
-          else
-            echo "没有提供构建参数"
-            echo "build_args=" >> $GITHUB_OUTPUT
+          # 如果项目已有Dockerfile，使用项目自带的
+          if [ -f "Dockerfile" ]; then
+            echo "检测到项目自带Dockerfile，将使用此Dockerfile构建"
+            echo "has_dockerfile=true" >> $GITHUB_OUTPUT
+            exit 0
           fi
+          
+          # 获取之前步骤中检测到的构建脚本
+          build_script="${{ steps.analyze-source.outputs.build_script }}"
+          
+          # 生成适合项目类型的Dockerfile
+          echo "未检测到项目中的Dockerfile，根据项目类型自动生成"
+          
+          # 检测Node.js项目
+          if [ -f "package.json" ]; then
+            echo "检测到Node.js项目"
+            
+            # 检测项目类型
+            npm_start=$(grep -w "start" package.json || echo "")
+            
+            # 检测框架类型
+            has_react=$(grep -i "react" package.json || echo "")
+            has_vue=$(grep -i "vue" package.json || echo "")
+            has_next=$(grep -i "next" package.json || echo "")
+            has_nuxt=$(grep -i "nuxt" package.json || echo "")
+            
+            # 根据框架类型创建对应Dockerfile
+            if [ -n "$has_next" ]; then
+              echo "Next.js项目"
+              cat > Dockerfile <<EOF
+          FROM node:16-alpine AS builder
+          
+          # 安装git和其他必要工具
+          RUN apk add --no-cache git openssh
+          
+          WORKDIR /app
+          COPY . .
+          RUN npm ci --legacy-peer-deps || npm install --legacy-peer-deps
+          EOF
+          
+              # 根据检测到的构建脚本添加构建命令
+              if [ "$build_script" != "none" ]; then
+                echo "RUN npm run $build_script" >> Dockerfile
+              else
+                echo "# 未检测到构建脚本，跳过构建步骤" >> Dockerfile
+              fi
+          
+              cat >> Dockerfile <<EOF
+          
+          FROM node:16-alpine
+          WORKDIR /app
+          COPY --from=builder /app/package*.json ./
+          COPY --from=builder /app/next.config.js* ./
+          COPY --from=builder /app/public* ./public/
+          COPY --from=builder /app/.next* ./.next/
+          COPY --from=builder /app/node_modules ./node_modules
+          
+          ENV NODE_ENV=production
+          EXPOSE 3000
+          CMD ["npm", "start"]
+          EOF
+            
+            elif [ -n "$has_nuxt" ]; then
+              echo "Nuxt.js项目"
+              cat > Dockerfile <<EOF
+          FROM node:16-alpine AS builder
+          
+          # 安装git和其他必要工具
+          RUN apk add --no-cache git openssh
+          
+          WORKDIR /app
+          COPY . .
+          RUN npm ci --legacy-peer-deps || npm install --legacy-peer-deps
+          EOF
+          
+              # 根据检测到的构建脚本添加构建命令
+              if [ "$build_script" != "none" ]; then
+                echo "RUN npm run $build_script" >> Dockerfile
+              else
+                echo "# 未检测到构建脚本，跳过构建步骤" >> Dockerfile
+              fi
+          
+              cat >> Dockerfile <<EOF
+          
+          FROM node:16-alpine
+          WORKDIR /app
+          COPY --from=builder /app/package*.json ./
+          COPY --from=builder /app/.nuxt* ./.nuxt/
+          COPY --from=builder /app/static* ./static/
+          COPY --from=builder /app/nuxt.config.js* ./
+          COPY --from=builder /app/node_modules ./node_modules
+          
+          ENV NODE_ENV=production
+          EXPOSE 3000
+          CMD ["npm", "start"]
+          EOF
+              
+            elif [ -n "$has_react" ] || [ -n "$has_vue" ]; then
+              echo "React/Vue前端项目"
+              cat > Dockerfile <<EOF
+          FROM node:16-alpine AS builder
+          
+          # 安装git和其他必要工具
+          RUN apk add --no-cache git openssh
+          
+          WORKDIR /app
+          COPY package*.json ./
+          RUN npm ci --legacy-peer-deps || npm install --legacy-peer-deps
+          COPY . .
+          EOF
+          
+              # 根据检测到的构建脚本添加构建命令
+              if [ "$build_script" != "none" ]; then
+                echo "RUN npm run $build_script" >> Dockerfile
+              fi
+          
+              cat >> Dockerfile <<EOF
+          
+          FROM nginx:alpine
+          EOF
+          
+              # 根据框架类型和构建脚本选择输出目录
+              if [ "$build_script" == "none" ]; then
+                # 没有构建脚本，直接复制源码
+                echo "COPY --from=builder /app /usr/share/nginx/html" >> Dockerfile
+              else
+                if [ -n "$has_vue" ]; then
+                  # Vue项目通常输出到dist目录
+                  echo "COPY --from=builder /app/dist /usr/share/nginx/html" >> Dockerfile
+                else
+                  # React项目通常输出到build目录
+                  echo "COPY --from=builder /app/build /usr/share/nginx/html" >> Dockerfile
+                  # 如果是其他目录，添加备用方案
+                  echo "# 如果使用其他输出目录，取消相应注释" >> Dockerfile
+                  echo "# COPY --from=builder /app/dist /usr/share/nginx/html" >> Dockerfile
+                  echo "# COPY --from=builder /app/output /usr/share/nginx/html" >> Dockerfile
+                fi
+              fi
+          
+              cat >> Dockerfile <<EOF
+          
+          # 创建默认nginx配置，支持SPA应用
+          RUN echo 'server { \
+              listen 80; \
+              location / { \
+                  root /usr/share/nginx/html; \
+                  index index.html; \
+                  try_files \$uri \$uri/ /index.html; \
+              } \
+          }' > /etc/nginx/conf.d/default.conf
+          
+          EXPOSE 80
+          CMD ["nginx", "-g", "daemon off;"]
+          EOF
+            
+            else
+              echo "常规Node.js项目"
+              cat > Dockerfile <<EOF
+          FROM node:16-alpine
+          
+          # 安装git和其他必要工具
+          RUN apk add --no-cache git openssh
+          
+          WORKDIR /app
+          COPY package*.json ./
+          RUN npm ci --legacy-peer-deps || npm install --legacy-peer-deps
+          COPY . .
+          EOF
+          
+              # 如果有构建脚本且不是start，先运行构建脚本
+              if [ "$build_script" != "none" ] && [ "$build_script" != "start" ]; then
+                echo "RUN npm run $build_script" >> Dockerfile
+              fi
+          
+              cat >> Dockerfile <<EOF
+          
+          EXPOSE 3000
+          CMD ["npm", "start"]
+          EOF
+            fi
+          
+          # 检测Python项目
+          elif [ -f "requirements.txt" ] || [ -f "setup.py" ] || [ -f "pyproject.toml" ]; then
+            echo "检测到Python项目"
+            
+            cat > Dockerfile <<EOF
+          FROM python:3.9-slim
+          
+          # 安装git和其他必要工具
+          RUN apt-get update && apt-get install -y git && apt-get clean
+          
+          WORKDIR /app
+          
+          COPY requirements.txt* setup.py* pyproject.toml* ./
+          RUN pip install --no-cache-dir -r requirements.txt 2>/dev/null || \
+              pip install --no-cache-dir -e . 2>/dev/null || \
+              echo "依赖安装可能失败，继续执行"
+          
+          COPY . .
+          
+          EXPOSE 8000
+          CMD ["python", "app.py"]
+          EOF
+          
+          # 检测Java项目
+          elif [ -f "pom.xml" ] || [ -f "build.gradle" ]; then
+            echo "检测到Java项目"
+            
+            cat > Dockerfile <<EOF
+          FROM maven:3.8-openjdk-11-slim AS builder
+          
+          # 安装git
+          RUN apt-get update && apt-get install -y git && apt-get clean
+          
+          WORKDIR /app
+          COPY . .
+          RUN mvn package -DskipTests
+          
+          FROM openjdk:11-jre-slim
+          WORKDIR /app
+          # 假设JAR文件在target目录，根据实际情况调整
+          COPY --from=builder /app/target/*.jar ./app.jar
+          
+          EXPOSE 8080
+          CMD ["java", "-jar", "app.jar"]
+          EOF
+          
+          # 默认处理为静态网站
+          else
+            echo "未检测到特定项目类型，作为静态网站处理"
+            
+            cat > Dockerfile <<EOF
+          FROM nginx:alpine
+          COPY . /usr/share/nginx/html
+          EXPOSE 80
+          CMD ["nginx", "-g", "daemon off;"]
+          EOF
+          fi
+          
+          echo "has_dockerfile=false" >> $GITHUB_OUTPUT
+          
+          echo "------------生成的Dockerfile内容------------"
+          cat Dockerfile
+          echo "--------------------------------------------"
         shell: bash
 
-      # 使用Docker Buildx构建并推送镜像
+      # 使用Docker官方构建工具构建并推送镜像
       - name: 构建并推送Docker镜像
-        env:
-          CONTEXT_PATH: ${{ steps.build_params.outputs.context_path }}
-          DOCKERFILE_PATH: ${{ steps.check_dockerfile.outputs.dockerfile_path }}
-          BUILD_ARGS: ${{ steps.build_params.outputs.build_args }}
-          PLATFORMS: ${{ steps.parse_params.outputs.platforms }}
-        run: |
-          # 显示构建信息
-          echo "构建上下文: $CONTEXT_PATH"
-          echo "Dockerfile路径: $DOCKERFILE_PATH"
-          echo "构建参数: $BUILD_ARGS"
-          echo "构建平台: $PLATFORMS"
-          
-          # 执行构建命令
-          docker buildx build \
-            --platform $PLATFORMS \
-            -t ${{ github.event.inputs.registry }}/${{ github.event.inputs.image_name }}:${{ github.event.inputs.image_tag }} \
-            -f $DOCKERFILE_PATH \
-            $BUILD_ARGS \
-            --push \
-            --cache-from type=gha \
-            --cache-to type=gha,mode=max \
-            $CONTEXT_PATH
-        shell: bash
+        uses: docker/build-push-action@v4
+        with:
+          context: ./src
+          push: true
+          tags: ${{ github.event.inputs.registry }}/${{ github.event.inputs.image_name }}:${{ github.event.inputs.image_tag }}
+          platforms: linux/amd64
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          build-args: |
+            NODE_ENV=production
+            NPM_FLAG=--legacy-peer-deps
 
       # 构建完成后通知
       - name: 通知构建完成
-        if: ${{ success() && steps.parse_params.outputs.has_callback == 'true' }}
+        if: ${{ success() && github.event.inputs.callback_url != '' }}
         run: |
-          callback_url="${{ steps.parse_params.outputs.callback_url }}"
-          
-          curl -X POST $callback_url \
+          curl -X POST ${{ github.event.inputs.callback_url }} \
             -H "Content-Type: application/json" \
             -d '{
               "status": "success",
@@ -273,11 +435,9 @@ jobs:
 
       # 构建失败后通知
       - name: 通知构建失败
-        if: ${{ failure() && steps.parse_params.outputs.has_callback == 'true' }}
+        if: ${{ failure() && github.event.inputs.callback_url != '' }}
         run: |
-          callback_url="${{ steps.parse_params.outputs.callback_url }}"
-          
-          curl -X POST $callback_url \
+          curl -X POST ${{ github.event.inputs.callback_url }} \
             -H "Content-Type: application/json" \
             -d '{
               "status": "failed",

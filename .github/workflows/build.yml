@@ -189,16 +189,19 @@ jobs:
           fi
           
           # 准备提示信息
-          PROMPT="分析以下源代码仓库，创建一个生产级别的Dockerfile。要求:"
+          PROMPT="分析以下源代码仓库，创建一个生产级别的Dockerfile，特别注重镜像大小优化。要求:"
           
           # 根据用户选择的优化选项调整提示
           AI_OPTION="${{ github.event.inputs.ai_options }}"
           if [ "$AI_OPTION" == "size" ] || [ -z "$AI_OPTION" ]; then
             PROMPT="$PROMPT
-            1. 优先考虑减小镜像大小，使用轻量级基础镜像
-            2. 使用多阶段构建以优化最终镜像体积
-            3. 移除构建依赖和中间产物
-            4. 最小化层数和大小"
+            1. 必须使用alpine版本的基础镜像，如node:14-alpine而不是node:14
+            2. 必须使用多阶段构建，将构建过程和运行环境分开
+            3. 只复制生产运行必要的文件，忽略.git、tests等目录 
+            4. 优化层顺序，确保频繁变化的层在最后
+            5. 整合RUN命令，减少层数
+            6. 构建完成后清理缓存和临时文件
+            7. 如果使用Node.js，确保使用--production标志安装依赖"
           elif [ "$AI_OPTION" == "security" ]; then
             PROMPT="$PROMPT
             1. 优先考虑安全性，使用官方安全基础镜像
@@ -335,10 +338,45 @@ jobs:
           cd src
           echo "验证AI生成的Dockerfile..."
           
+          # 检查基础镜像是否是alpine版本
+          if ! grep -q "alpine" Dockerfile; then
+            echo "警告: 基础镜像不是alpine版本，替换为轻量级alpine镜像..."
+            # 识别当前使用的node版本
+            NODE_VER=$(grep -o "node:[0-9]*" Dockerfile | head -1 | cut -d':' -f2)
+            NODE_VER=${NODE_VER:-14}
+            # 备份原始Dockerfile
+            cp Dockerfile Dockerfile.original
+            # 替换基础镜像
+            sed -i "s|FROM node:$NODE_VER|FROM node:$NODE_VER-alpine|g" Dockerfile
+            # 如果没有多阶段构建，尝试添加
+            if [ $(grep -c "FROM" Dockerfile) -eq 1 ]; then
+              echo "警告: 未使用多阶段构建，添加构建和运行阶段..."
+              cat > Dockerfile.new << EOF
+# 构建阶段
+FROM node:$NODE_VER-alpine AS builder
+WORKDIR /app
+COPY package*.json ./
+RUN npm ci --only=production
+COPY . .
+
+# 运行阶段
+FROM node:$NODE_VER-alpine
+WORKDIR /app
+COPY --from=builder /app/package.json ./
+COPY --from=builder /app/node_modules ./node_modules
+COPY --from=builder /app/. ./
+
+# 设置运行命令
+CMD ["npm", "start"]
+EOF
+              mv Dockerfile.new Dockerfile
+            fi
+          fi
+          
           # 检查Dockerfile基本结构
           if ! grep -q "FROM" Dockerfile; then
             echo "警告: Dockerfile缺少FROM指令，添加默认基础镜像..."
-            echo "FROM node:16-alpine" > Dockerfile.new
+            echo "FROM node:14-alpine" > Dockerfile.new
             cat Dockerfile >> Dockerfile.new
             mv Dockerfile.new Dockerfile
           fi
@@ -358,7 +396,7 @@ jobs:
           # 确保有CMD或ENTRYPOINT
           if ! grep -q "CMD" Dockerfile && ! grep -q "ENTRYPOINT" Dockerfile; then
             echo "警告: Dockerfile缺少CMD或ENTRYPOINT指令，添加默认命令..."
-            echo "CMD [\"sh\", \"-c\", \"if [ -f package.json ]; then npm start; elif [ -f requirements.txt ]; then python app.py; else echo 'Unable to determine start command' && exit 1; fi\"]" >> Dockerfile
+            echo "CMD [\"npm\", \"start\"]" >> Dockerfile
           fi
           
           echo "Dockerfile验证完成，最终内容:"

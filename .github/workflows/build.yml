@@ -161,12 +161,12 @@ jobs:
         shell: bash
 
       # 使用AI生成Dockerfile
-      - name: 使用GitHub Copilot生成Dockerfile
+      - name: 使用讯飞星火Spark Lite生成Dockerfile
         if: steps.project-detection.outputs.use_existing_dockerfile == 'false'
         id: generate-dockerfile
         run: |
           cd src
-          echo "开始使用AI分析项目并生成Dockerfile..."
+          echo "开始使用讯飞星火AI分析项目并生成Dockerfile..."
           
           # 准备更详细的项目分析
           echo "正在进行深度项目分析..."
@@ -202,7 +202,7 @@ jobs:
             fi
           fi
           
-          # 使用GitHub Copilot提示生成Dockerfile
+          # 准备提示信息
           PROMPT="分析以下源代码仓库，创建一个生产级别的Dockerfile。要求:"
           
           # 根据用户选择的优化选项调整提示
@@ -233,20 +233,78 @@ jobs:
           $(cat ../project_info.txt 2>/dev/null || echo '未找到项目信息')
           $(cat ../project_analysis.txt 2>/dev/null || echo '')
           
-          请生成完整的Dockerfile，不要包含任何注释或解释:"
+          请生成完整的Dockerfile，不要包含任何注释或解释。"
           
-          # 调用GitHub Copilot CLI
-          echo "$PROMPT" | gh copilot suggest -t shell > ../dockerfile_gen.txt || {
-            echo "GitHub Copilot CLI调用失败，AI不可用"
+          # 将PROMPT保存为文件
+          echo "$PROMPT" > ../prompt.txt
+          
+          # 配置讯飞星火API参数
+          SPARK_API_PASSWORD="${{ secrets.SPARK_API_PASSWORD }}"
+          
+          # 如果secrets未设置，使用用户提供的默认值
+          if [ -z "$SPARK_API_PASSWORD" ]; then
+            # 使用用户提供的密钥
+            SPARK_API_PASSWORD="ksdxvpoAEoUgBgqShIIb"
+          fi
+          
+          # 生成请求URL
+          AUTH_URL="https://spark-api-open.xf-yun.com/v1/chat/completions"
+          
+          # 构建请求体 - 使用正确的讯飞星火模型参数格式
+          # 创建临时JSON文件，以避免shell中的转义问题
+          cat > ../spark_request.json << EOF
+{
+  "model": "lite",
+  "messages": [
+    {
+      "role": "user",
+      "content": "$PROMPT"
+    }
+  ],
+  "temperature": 0.5,
+  "max_tokens": 4096
+}
+EOF
+          
+          # 执行HTTP请求
+          echo "调用讯飞星火API生成Dockerfile..."
+          curl -s -X POST "$AUTH_URL" \
+            -H "Content-Type: application/json" \
+            -H "Authorization: Bearer $SPARK_API_PASSWORD" \
+            -d @../spark_request.json > ../ai_response.json
+          
+          # 检查API调用是否成功
+          if [ $? -ne 0 ]; then
+            echo "讯飞星火API调用失败"
             exit 1
-          }
+          fi
           
-          # 提取生成的Dockerfile
-          sed -n '/```dockerfile/,/```/p' ../dockerfile_gen.txt | grep -v '```' > Dockerfile
+          # 显示API响应状态
+          CODE=$(jq -r '.code // 1' ../ai_response.json 2>/dev/null || echo "1")
+          if [ "$CODE" != "0" ]; then
+            echo "讯飞星火API返回错误，错误代码: $CODE"
+            echo "错误信息: $(jq -r '.message // "未知错误"' ../ai_response.json 2>/dev/null || echo "未知错误")"
+            exit 1
+          fi
+          
+          # 从响应中提取Dockerfile内容
+          if [ -x "$(command -v jq)" ]; then
+            # 使用jq解析json
+            jq -r '.choices[0].message.content' ../ai_response.json > Dockerfile
+          else
+            # 备用方案：使用grep提取
+            grep -o '"content":"[^"]*"' ../ai_response.json | head -1 | sed 's/"content":"//;s/"$//' > Dockerfile
+          fi
+          
+          # 清理Dockerfile (移除可能的markdown代码块标记)
+          sed -i 's/```dockerfile//g' Dockerfile
+          sed -i 's/```//g' Dockerfile
           
           # 检查生成结果
           if [ ! -s Dockerfile ]; then
             echo "AI生成Dockerfile失败，无有效输出"
+            echo "API返回内容:" 
+            cat ../ai_response.json
             exit 1
           else
             echo "AI已成功生成Dockerfile:"

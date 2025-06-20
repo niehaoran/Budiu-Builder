@@ -728,10 +728,10 @@ $BUILD_ERROR_FEEDBACK
               # 创建基本Dockerfile
               echo "未找到有效的Dockerfile指令，创建基本Dockerfile..."
               echo "FROM node:14-alpine" > Dockerfile
-            echo "WORKDIR /app" >> Dockerfile
-            echo "COPY . ." >> Dockerfile
-            echo "RUN if [ -f \"package.json\" ]; then npm install; fi" >> Dockerfile
-            echo "CMD [\"npm\", \"start\"]" >> Dockerfile
+              echo "WORKDIR /app" >> Dockerfile
+              echo "COPY . ." >> Dockerfile
+              echo "RUN if [ -f \"package.json\" ]; then npm install; fi" >> Dockerfile
+              echo "CMD [\"npm\", \"start\"]" >> Dockerfile
             fi
             
             echo "生成的Dockerfile内容:"

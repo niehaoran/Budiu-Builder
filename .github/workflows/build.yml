@@ -315,18 +315,43 @@ jobs:
           # 尝试两种可能的响应格式提取内容
           if jq -e '.choices[0].message.content' ../ai_response.json > /dev/null 2>&1; then
             # 标准OpenAI格式
-            jq -r '.choices[0].message.content' ../ai_response.json > Dockerfile
+            jq -r '.choices[0].message.content' ../ai_response.json > Dockerfile.raw
           elif jq -e '.payload.choices.text[0].content' ../ai_response.json > /dev/null 2>&1; then
             # 讯飞星火可能的另一种格式
-            jq -r '.payload.choices.text[0].content' ../ai_response.json > Dockerfile
+            jq -r '.payload.choices.text[0].content' ../ai_response.json > Dockerfile.raw
           else
             # 如果上面都失败，尝试直接提取所有文本内容
-            cat ../ai_response.json > Dockerfile
+            cat ../ai_response.json > Dockerfile.raw
           fi
           
-          # 清理Dockerfile (移除可能的markdown代码块标记)
-          sed -i 's/```dockerfile//g' Dockerfile
-          sed -i 's/```//g' Dockerfile
+          # 清理Dockerfile内容，确保没有无效的前缀和标记
+          cat Dockerfile.raw | sed -e '/^Dockerfile$/d' \
+                                 -e 's/^Dockerfile\s*//g' \
+                                 -e 's/```dockerfile//g' \
+                                 -e 's/```//g' \
+                                 -e '/^#/!b' \
+                                 -e '/^FROM/,$p' \
+                                 -e d > Dockerfile
+          
+          # 检查Dockerfile是否以有效指令开头
+          FIRST_LINE=$(head -n 1 Dockerfile)
+          if ! echo "$FIRST_LINE" | grep -q -E "^(FROM|ARG|ONBUILD)" ; then
+            echo "生成的Dockerfile不以有效的指令开头，修正内容..."
+            # 找到第一个FROM指令
+            FROM_LINE=$(grep -n "^FROM" Dockerfile.raw | head -1 | cut -d ':' -f 1)
+            if [ -n "$FROM_LINE" ]; then
+              # 从FROM行开始提取
+              tail -n +$FROM_LINE Dockerfile.raw > Dockerfile
+            else
+              # 如果没找到FROM，创建一个基本的Dockerfile
+              echo "未找到FROM指令，创建基本Dockerfile..."
+              echo "FROM node:14-alpine" > Dockerfile
+              echo "WORKDIR /app" >> Dockerfile
+              echo "COPY . ." >> Dockerfile
+              echo "RUN if [ -f \"package.json\" ]; then npm install; fi" >> Dockerfile
+              echo "CMD [\"npm\", \"start\"]" >> Dockerfile
+            fi
+          fi
           
           # 检查生成结果
           if [ ! -s Dockerfile ]; then

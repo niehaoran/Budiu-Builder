@@ -52,32 +52,58 @@ jobs:
           repo_token="${{ github.event.inputs.repo_token }}"
           branch="${{ github.event.inputs.branch }}"
           
+          # 尝试自动检测默认分支
+          if [ "$branch" = "main" ] || [ "$branch" = "master" ]; then
+            echo "尝试自动检测默认分支..."
+            
+            if [[ $repo_url == *github.com* ]]; then
+              repo_path=$(echo $repo_url | sed -E 's/https:\/\/github.com\/|git@github.com://;s/.git$//')
+              default_branch=$(curl -s https://api.github.com/repos/$repo_path | grep -o '"default_branch": "[^"]*' | cut -d'"' -f4)
+            fi
+            
+            if [ -n "$default_branch" ]; then
+              echo "自动检测到默认分支: $default_branch"
+              branch=$default_branch
+            fi
+          fi
+          
+          echo "最终使用分支: $branch"
+          
           # 处理私有仓库的身份验证
           if [ -n "$repo_token" ]; then
             # GitHub 仓库
             if [[ $repo_url == *github.com* ]]; then
               auth_repo_url=$(echo $repo_url | sed "s/https:\/\//https:\/\/$repo_token@/")
-              git clone --depth 1 -b $branch $auth_repo_url src
+              git clone --depth 1 -b $branch $auth_repo_url src || git clone --depth 1 $auth_repo_url src
             
             # Gitee 仓库
             elif [[ $repo_url == *gitee.com* ]]; then
               auth_repo_url=$(echo $repo_url | sed "s/https:\/\//https:\/\/$repo_token@/")
-              git clone --depth 1 -b $branch $auth_repo_url src
+              git clone --depth 1 -b $branch $auth_repo_url src || git clone --depth 1 $auth_repo_url src
             
             else
               echo "不支持的仓库类型，但尝试使用令牌进行克隆"
               auth_repo_url=$(echo $repo_url | sed "s/https:\/\//https:\/\/$repo_token@/")
-              git clone --depth 1 -b $branch $auth_repo_url src
+              git clone --depth 1 -b $branch $auth_repo_url src || git clone --depth 1 $auth_repo_url src
             fi
           else
             # 公开仓库，无需令牌
-            git clone --depth 1 -b $branch $repo_url src
+            git clone --depth 1 -b $branch $repo_url src || git clone --depth 1 $repo_url src
+          fi
+          
+          if [ ! -d "src" ]; then
+            echo "克隆失败，请检查仓库地址和分支名称是否正确"
+            exit 1
           fi
         shell: bash
 
+      # 设置Docker Buildx (支持多平台构建)
       - name: 设置Docker Buildx
         uses: docker/setup-buildx-action@v2
+        with:
+          platforms: linux/amd64
 
+      # 登录Docker仓库
       - name: 登录镜像仓库
         uses: docker/login-action@v2
         with:
@@ -85,17 +111,197 @@ jobs:
           username: ${{ github.event.inputs.docker_username }}
           password: ${{ github.event.inputs.docker_password }}
 
-      - name: 设置 Buildpacks
-        uses: buildpacks/github-actions/setup-pack@v5.0.0
-
-      - name: 使用Buildpacks构建镜像
+      # 生成合适的Dockerfile (如果项目中不存在)
+      - name: 检测项目类型并准备Dockerfile
+        id: prepare-dockerfile
         run: |
           cd src
-          pack build ${{ github.event.inputs.registry }}/${{ github.event.inputs.image_name }}:${{ github.event.inputs.image_tag }} \
-            --builder paketobuildpacks/builder:base \
-            --publish
+          
+          # 如果项目已有Dockerfile，使用项目自带的
+          if [ -f "Dockerfile" ]; then
+            echo "检测到项目自带Dockerfile，将使用此Dockerfile构建"
+            echo "has_dockerfile=true" >> $GITHUB_OUTPUT
+            exit 0
+          fi
+          
+          # 生成适合项目类型的Dockerfile
+          echo "未检测到项目中的Dockerfile，根据项目类型自动生成"
+          
+          # 检测Node.js项目
+          if [ -f "package.json" ]; then
+            echo "检测到Node.js项目"
+            
+            # 检测项目类型
+            npm_start=$(grep -w "start" package.json || echo "")
+            npm_build=$(grep -w "build" package.json || echo "")
+            
+            # 检测框架类型
+            has_react=$(grep -i "react" package.json || echo "")
+            has_vue=$(grep -i "vue" package.json || echo "")
+            has_next=$(grep -i "next" package.json || echo "")
+            has_nuxt=$(grep -i "nuxt" package.json || echo "")
+            
+            # 根据框架类型创建对应Dockerfile
+            if [ -n "$has_next" ]; then
+              echo "Next.js项目"
+              cat > Dockerfile <<EOF
+          FROM node:16-alpine AS builder
+          WORKDIR /app
+          COPY . .
+          RUN npm ci --legacy-peer-deps || npm install --legacy-peer-deps
+          RUN npm run build
+          
+          FROM node:16-alpine
+          WORKDIR /app
+          COPY --from=builder /app/package*.json ./
+          COPY --from=builder /app/next.config.js ./
+          COPY --from=builder /app/public ./public
+          COPY --from=builder /app/.next ./.next
+          COPY --from=builder /app/node_modules ./node_modules
+          
+          ENV NODE_ENV=production
+          EXPOSE 3000
+          CMD ["npm", "start"]
+          EOF
+            
+            elif [ -n "$has_nuxt" ]; then
+              echo "Nuxt.js项目"
+              cat > Dockerfile <<EOF
+          FROM node:16-alpine AS builder
+          WORKDIR /app
+          COPY . .
+          RUN npm ci --legacy-peer-deps || npm install --legacy-peer-deps
+          RUN npm run build
+          
+          FROM node:16-alpine
+          WORKDIR /app
+          COPY --from=builder /app/package*.json ./
+          COPY --from=builder /app/.nuxt ./.nuxt
+          COPY --from=builder /app/static ./static
+          COPY --from=builder /app/nuxt.config.js ./nuxt.config.js
+          COPY --from=builder /app/node_modules ./node_modules
+          
+          ENV NODE_ENV=production
+          EXPOSE 3000
+          CMD ["npm", "start"]
+          EOF
+              
+            elif [ -n "$has_react" ] || [ -n "$has_vue" ]; then
+              echo "React/Vue前端项目"
+              cat > Dockerfile <<EOF
+          FROM node:16-alpine AS builder
+          WORKDIR /app
+          COPY package*.json ./
+          RUN npm ci --legacy-peer-deps || npm install --legacy-peer-deps
+          COPY . .
+          RUN npm run build
+          
+          FROM nginx:alpine
+          COPY --from=builder /app/build /usr/share/nginx/html
+          # 如果使用Vue，取消下面注释
+          # COPY --from=builder /app/dist /usr/share/nginx/html
+          
+          # 创建默认nginx配置，支持SPA应用
+          RUN echo 'server { \
+              listen 80; \
+              location / { \
+                  root /usr/share/nginx/html; \
+                  index index.html; \
+                  try_files $uri $uri/ /index.html; \
+              } \
+          }' > /etc/nginx/conf.d/default.conf
+          
+          EXPOSE 80
+          CMD ["nginx", "-g", "daemon off;"]
+          EOF
+            
+            else
+              echo "常规Node.js项目"
+              cat > Dockerfile <<EOF
+          FROM node:16-alpine
+          WORKDIR /app
+          COPY package*.json ./
+          RUN npm ci --legacy-peer-deps || npm install --legacy-peer-deps
+          COPY . .
+          
+          EXPOSE 3000
+          CMD ["npm", "start"]
+          EOF
+            fi
+          
+          # 检测Python项目
+          elif [ -f "requirements.txt" ] || [ -f "setup.py" ] || [ -f "pyproject.toml" ]; then
+            echo "检测到Python项目"
+            
+            cat > Dockerfile <<EOF
+          FROM python:3.9-slim
+          
+          WORKDIR /app
+          
+          COPY requirements.txt* setup.py* pyproject.toml* ./
+          RUN pip install --no-cache-dir -r requirements.txt 2>/dev/null || \
+              pip install --no-cache-dir -e . 2>/dev/null || \
+              echo "依赖安装可能失败，继续执行"
+          
+          COPY . .
+          
+          EXPOSE 8000
+          CMD ["python", "app.py"]
+          EOF
+          
+          # 检测Java项目
+          elif [ -f "pom.xml" ] || [ -f "build.gradle" ]; then
+            echo "检测到Java项目"
+            
+            cat > Dockerfile <<EOF
+          FROM maven:3.8-openjdk-11-slim AS builder
+          WORKDIR /app
+          COPY . .
+          RUN mvn package -DskipTests
+          
+          FROM openjdk:11-jre-slim
+          WORKDIR /app
+          # 假设JAR文件在target目录，根据实际情况调整
+          COPY --from=builder /app/target/*.jar ./app.jar
+          
+          EXPOSE 8080
+          CMD ["java", "-jar", "app.jar"]
+          EOF
+          
+          # 默认处理为静态网站
+          else
+            echo "未检测到特定项目类型，作为静态网站处理"
+            
+            cat > Dockerfile <<EOF
+          FROM nginx:alpine
+          COPY . /usr/share/nginx/html
+          EXPOSE 80
+          CMD ["nginx", "-g", "daemon off;"]
+          EOF
+          fi
+          
+          echo "has_dockerfile=false" >> $GITHUB_OUTPUT
+          
+          echo "------------生成的Dockerfile内容------------"
+          cat Dockerfile
+          echo "--------------------------------------------"
         shell: bash
 
+      # 使用Docker官方构建工具构建并推送镜像
+      - name: 构建并推送Docker镜像
+        uses: docker/build-push-action@v4
+        with:
+          context: ./src
+          push: true
+          tags: ${{ github.event.inputs.registry }}/${{ github.event.inputs.image_name }}:${{ github.event.inputs.image_tag }}
+          platforms: linux/amd64
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          build-args: |
+            NODE_ENV=production
+            NPM_FLAG=--legacy-peer-deps
+
+      # 构建完成后通知
       - name: 通知构建完成
         if: ${{ success() && github.event.inputs.callback_url != '' }}
         run: |
@@ -110,6 +316,7 @@ jobs:
             }'
         shell: bash
 
+      # 构建失败后通知
       - name: 通知构建失败
         if: ${{ failure() && github.event.inputs.callback_url != '' }}
         run: |

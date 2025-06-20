@@ -1039,6 +1039,17 @@ $BUILD_ERROR_FEEDBACK
           # cache-from: type=gha
           # cache-to: type=gha,mode=max
 
+      # 构建失败后，重新尝试AI生成和构建
+      - name: 重新尝试AI生成和构建
+        if: steps.build-ai-dockerfile.outcome == 'failure' && steps.project-detection.outputs.use_existing_dockerfile == 'false'
+        uses: docker/build-push-action@v4
+        with:
+          context: ./src
+          push: true
+          tags: ${{ github.event.inputs.registry }}/${{ github.event.inputs.image_name }}:${{ github.event.inputs.image_tag }}
+          no-cache: true
+          # 禁用缓存配置，避免错误
+          
       # 构建完成后通知
       - name: 通知构建完成
         if: ${{ success() && github.event.inputs.callback_url != '' }}
@@ -1079,6 +1090,12 @@ $BUILD_ERROR_FEEDBACK
             DOCKERFILE_CONTENT=$(cat src/Dockerfile | base64 -w 0)
           fi
           
+          # 添加构建错误信息（如果有）
+          BUILD_ERROR=""
+          if [ -f "build_error.txt" ]; then
+            BUILD_ERROR=$(cat build_error.txt | base64 -w 0)
+          fi
+          
           curl -X POST ${{ github.event.inputs.callback_url }} \
             -H "Content-Type: application/json" \
             -d '{
@@ -1086,6 +1103,7 @@ $BUILD_ERROR_FEEDBACK
               "repo_url": "${{ github.event.inputs.repo_url }}",
               "branch": "${{ github.event.inputs.branch }}",
               "build_id": "${{ github.run_id }}",
-              "dockerfile_content_base64": "'"$DOCKERFILE_CONTENT"'"
+              "dockerfile_content_base64": "'"$DOCKERFILE_CONTENT"'",
+              "build_error_base64": "'"$BUILD_ERROR"'"
             }'
         shell: bash 

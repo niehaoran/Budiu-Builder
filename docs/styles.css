@@ -8,6 +8,8 @@
   --error-color: #721c24;
   --pending-bg: #fff3cd;
   --pending-color: #856404;
+  --warning-bg: #fff3cd;
+  --warning-color: #856404;
   --border-color: #ddd;
   --border-light: #eee;
   --bg-light: #f8f9fa;
@@ -63,6 +65,19 @@ h3 {
   box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
   padding: 2rem;
   margin-bottom: 2rem;
+}
+
+.warning {
+  background-color: var(--warning-bg);
+  color: var(--warning-color);
+  border-left: 4px solid var(--warning-color);
+}
+
+.warning code {
+  background-color: rgba(0, 0, 0, 0.05);
+  padding: 0.2rem 0.4rem;
+  border-radius: 3px;
+  font-family: monospace;
 }
 
 .form-section {

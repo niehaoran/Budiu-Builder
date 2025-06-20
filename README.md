@@ -15,13 +15,30 @@ Budiu-Builder是一个基于GitHub Actions的自动构建系统，用于将GitHu
 
 ### 服务器端设置
 
-1. Fork本仓库
+1. Fork本仓库到您的GitHub账号
 2. 配置GitHub Actions工作流：
    - `.github/workflows/build.yml`文件已包含所有构建逻辑
    - 无需设置仓库级别的Secrets，所有必要信息在构建时由用户提供
 3. 部署Web界面：
    - 启用GitHub Pages，选择`/docs`目录作为源
    - 用户可以通过Web界面直接触发构建
+
+### 重要：配置仓库信息
+
+在部署后，您需要修改一个关键设置才能使系统正常工作：
+
+1. 编辑 `docs/app.js` 文件
+2. 找到以下代码行（大约在第14行）:
+   ```javascript
+   const DEFAULT_REPO = 'your-username/Budiu-Builder';
+   ```
+3. 将其更改为您的GitHub用户名和仓库名:
+   ```javascript
+   const DEFAULT_REPO = 'your-actual-username/Budiu-Builder';
+   ```
+4. 保存并提交更改
+
+这一步非常重要，因为它告诉前端界面应该触发哪个仓库的GitHub Actions工作流。
 
 ### Web界面部署
 
@@ -76,11 +93,23 @@ Budiu-Builder是一个基于GitHub Actions的自动构建系统，用于将GitHu
 - `workflow` - 更新GitHub Actions工作流文件的权限
 
 创建令牌的步骤：
-1. 访问GitHub设置页面
+1. 访问GitHub设置页面 (https://github.com/settings/profile)
 2. 点击"Developer settings"
 3. 选择"Personal access tokens" > "Tokens (classic)"
-4. 点击"Generate new token"
-5. 选择上述权限并创建令牌
+4. 点击"Generate new token" > "Generate new token (classic)"
+5. 填写说明，例如"Budiu-Builder"
+6. 选择权限：勾选"repo"和"workflow"选项
+7. 点击"Generate token"按钮
+8. 复制生成的令牌（注意：令牌只会显示一次）
+
+## 故障排除
+
+如果触发构建失败，请检查：
+
+1. 您是否已正确更新`docs/app.js`中的`DEFAULT_REPO`值为您自己的仓库
+2. GitHub令牌是否拥有`repo`和`workflow`权限
+3. 浏览器控制台中是否有错误信息（F12打开开发者工具）
+4. 确保GitHub Actions在您的仓库中已启用
 
 ## 配置文件
 

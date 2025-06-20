@@ -239,12 +239,14 @@ jobs:
           echo "$PROMPT" > ../prompt.txt
           
           # 配置讯飞星火API参数
+          # 使用HTTP服务接口认证信息中的APIPassword
           SPARK_API_PASSWORD="${{ secrets.SPARK_API_PASSWORD }}"
           
-          # 如果secrets未设置，使用用户提供的默认值
+          # 检查密钥是否设置
           if [ -z "$SPARK_API_PASSWORD" ]; then
-            # 使用用户提供的密钥
-            SPARK_API_PASSWORD="ksdxvpoAEoUgBgqShIIb"
+            echo "错误: 未设置SPARK_API_PASSWORD密钥。请在GitHub仓库的Settings > Secrets > Actions中添加此密钥。"
+            echo "密钥值应为讯飞星火HTTP服务接口认证信息中的APIPassword。"
+            exit 1
           fi
           
           # 生成请求URL
@@ -253,9 +255,9 @@ jobs:
           # 读取PROMPT内容并转义为JSON字符串
           PROMPT_CONTENT=$(cat ../prompt.txt | sed 's/"/\\"/g' | tr '\n' ' ')
           
-          # 构建请求体JSON
+          # 构建请求体JSON - 使用正确的模型名称
           echo '{
-            "model": "lite",
+            "model": "generalv3",
             "messages": [
               {
                 "role": "user",

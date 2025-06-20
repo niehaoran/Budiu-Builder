@@ -1,4 +1,4 @@
-name: Build and Deploy
+name: Budiu 智能构建部署
 
 on:
   workflow_dispatch:
@@ -41,9 +41,12 @@ permissions:
   id-token: write
 
 jobs:
-  build:
+  build-deploy:
     runs-on: ubuntu-latest
     steps:
+      - name: 配置初始化
+        run: echo "开始Budiu智能构建部署流程..."
+
       - name: 检查输入参数
         run: |
           echo "代码仓库: ${{ github.event.inputs.repo_url }}"
@@ -58,50 +61,26 @@ jobs:
           repo_token="${{ github.event.inputs.repo_token }}"
           branch="${{ github.event.inputs.branch }}"
           
-          # 直接使用用户提供的分支
-          echo "使用用户指定分支: $branch"
-          
-          # 处理私有仓库的身份验证
           if [ -n "$repo_token" ]; then
-            # GitHub 仓库
-            if [[ $repo_url == *github.com* ]]; then
-              auth_repo_url=$(echo $repo_url | sed "s/https:\/\//https:\/\/$repo_token@/")
-              git clone --depth 1 -b $branch $auth_repo_url src || git clone --depth 1 $auth_repo_url src
-            
-            # Gitee 仓库
-            elif [[ $repo_url == *gitee.com* ]]; then
-              auth_repo_url=$(echo $repo_url | sed "s/https:\/\//https:\/\/$repo_token@/")
-              git clone --depth 1 -b $branch $auth_repo_url src || git clone --depth 1 $auth_repo_url src
-            
-            else
-              echo "不支持的仓库类型，但尝试使用令牌进行克隆"
-              auth_repo_url=$(echo $repo_url | sed "s/https:\/\//https:\/\/$repo_token@/")
-              git clone --depth 1 -b $branch $auth_repo_url src || git clone --depth 1 $auth_repo_url src
-            fi
+            auth_repo_url=$(echo $repo_url | sed "s/https:\/\//https:\/\/$repo_token@/")
+            git clone --depth 1 -b $branch $auth_repo_url src || git clone --depth 1 $auth_repo_url src
           else
-            # 公开仓库，无需令牌
             git clone --depth 1 -b $branch $repo_url src || git clone --depth 1 $repo_url src
           fi
           
           if [ ! -d "src" ]; then
-            echo "克隆失败，请检查仓库地址和分支名称是否正确"
+            echo "克隆失败，请检查仓库地址和分支名称"
             exit 1
           fi
-        shell: bash
 
-      # 登录Docker仓库
       - name: 登录镜像仓库
         run: |
-          # 分割Docker认证字符串
           DOCKER_AUTH="${{ github.event.inputs.docker_auth }}"
           DOCKER_USERNAME=$(echo $DOCKER_AUTH | cut -d':' -f1)
           DOCKER_PASSWORD=$(echo $DOCKER_AUTH | cut -d':' -f2-)
           
-          # 使用Docker登录命令
           echo $DOCKER_PASSWORD | docker login ${{ github.event.inputs.registry }} -u $DOCKER_USERNAME --password-stdin
-        shell: bash
 
-      # 设置Docker Buildx
       - name: 设置Docker Buildx
         uses: docker/setup-buildx-action@v2
         with:
@@ -121,731 +100,95 @@ jobs:
             echo "未检测到Dockerfile，将使用AI生成"
             echo "use_existing_dockerfile=false" >> $GITHUB_OUTPUT
             
-            # 收集更全面的项目信息以辅助AI分析
-            echo "项目结构:" >> ../project_info.txt
+            # 收集项目信息
+            echo "项目结构:" > ../project_info.txt
             find . -type f -not -path "*/\.*" | sort >> ../project_info.txt
             
-            # 读取根目录所有文件内容
+            # 读取根目录文件
             echo "根目录文件列表:" >> ../project_info.txt
             ls -la >> ../project_info.txt
             
-            # 读取README文件内容（如果存在）
+            # 读取README文件
             if [ -f "README.md" ]; then
               echo "README.md内容:" >> ../project_info.txt
               cat README.md >> ../project_info.txt
-            elif [ -f "Readme.md" ]; then
-              echo "Readme.md内容:" >> ../project_info.txt
-              cat Readme.md >> ../project_info.txt
-            elif [ -f "README" ]; then
-              echo "README内容:" >> ../project_info.txt
-              cat README >> ../project_info.txt
-            fi
-            
-            # 检测主要技术栈
-            if [ -f "package.json" ]; then
-              echo "检测到Node.js项目" >> ../project_info.txt
-              echo "package.json内容:" >> ../project_info.txt
-              cat package.json >> ../project_info.txt
-            elif [ -f "requirements.txt" ]; then
-              echo "检测到Python项目" >> ../project_info.txt
-              echo "requirements.txt内容:" >> ../project_info.txt
-              cat requirements.txt >> ../project_info.txt
-            elif [ -f "pom.xml" ]; then
-              echo "检测到Java项目" >> ../project_info.txt
-              echo "pom.xml内容:" >> ../project_info.txt
-              cat pom.xml >> ../project_info.txt
-            elif [ -f "go.mod" ]; then
-              echo "检测到Go项目" >> ../project_info.txt
-              echo "go.mod内容:" >> ../project_info.txt
-              cat go.mod >> ../project_info.txt
             fi
           fi
         shell: bash
 
-      # 使用讯飞星火Spark Lite生成Dockerfile
-      - name: 使用讯飞星火Spark Lite生成Dockerfile
+      # 深度项目分析
+      - name: 深度项目分析
+        if: steps.project-detection.outputs.use_existing_dockerfile == 'false'
+        run: |
+          cd src
+          echo "进行深度项目分析..." > ../project_analysis.txt
+          
+          # 分析项目目录结构
+          find . -type f -not -path "*/\.*" -not -path "*/node_modules/*" | sort >> ../project_analysis.txt
+          
+          # 检测主要技术栈
+          if [ -f "package.json" ]; then
+            echo "检测到Node.js项目" >> ../project_analysis.txt
+            echo "package.json内容:" >> ../project_analysis.txt
+            cat package.json >> ../project_analysis.txt
+          elif [ -f "requirements.txt" ]; then
+            echo "检测到Python项目" >> ../project_analysis.txt
+            cat requirements.txt >> ../project_analysis.txt
+          elif [ -f "pom.xml" ]; then
+            echo "检测到Java项目" >> ../project_analysis.txt
+            cat pom.xml >> ../project_analysis.txt
+          fi
+        shell: bash
+
+      # 准备AI提示
+      - name: 准备AI提示
+        if: steps.project-detection.outputs.use_existing_dockerfile == 'false'
+        id: prepare-prompt
+        run: |
+          # 基础提示
+          echo "准备AI提示内容..."
+          echo "请基于项目分析结果，创建高质量Dockerfile，考虑：" > ../prompt.txt
+          echo "1. 选择合适的基础镜像(优先alpine版本)" >> ../prompt.txt
+          echo "2. 使用多阶段构建分离构建环境和运行环境" >> ../prompt.txt
+          echo "3. 仅复制必要文件，优化层顺序，合并RUN命令" >> ../prompt.txt
+          echo "4. 清理不必要的缓存和临时文件" >> ../prompt.txt
+          echo "5. 选择合适的端口和启动命令" >> ../prompt.txt
+          
+          # 根据优化选项调整提示
+          AI_OPTION="${{ github.event.inputs.ai_options }}"
+          if [ "$AI_OPTION" == "size" ] || [ -z "$AI_OPTION" ]; then
+            echo "优化目标：最小化镜像体积" >> ../prompt.txt
+          elif [ "$AI_OPTION" == "security" ]; then
+            echo "优化目标：提高安全性" >> ../prompt.txt
+          elif [ "$AI_OPTION" == "speed" ]; then
+            echo "优化目标：提高构建和运行速度" >> ../prompt.txt
+          fi
+          
+          # 添加收集的项目信息
+          echo "项目信息:" >> ../prompt.txt
+          cat ../project_info.txt >> ../prompt.txt
+          cat ../project_analysis.txt >> ../prompt.txt
+          
+      # 使用讯飞星火AI生成Dockerfile
+      - name: 使用讯飞星火AI生成Dockerfile
         if: steps.project-detection.outputs.use_existing_dockerfile == 'false'
         id: generate-dockerfile
         run: |
           cd src
-          echo "开始使用讯飞星火AI分析项目并生成Dockerfile..."
+          echo "使用讯飞星火AI分析项目并生成Dockerfile..."
           
-          # 准备更详细的项目分析
-          echo "正在进行深度项目分析..."
+          # 获取提示内容
+          PROMPT=$(cat ../prompt.txt)
           
-          # 分析项目结构并保存
-          echo "分析项目目录结构..." >> ../project_analysis.txt
-          find . -type f -not -path "*/\.*" -not -path "*/node_modules/*" -not -path "*/venv/*" | sort >> ../project_analysis.txt
+          # API认证和请求参数
+          SPARK_API_PASSWORD="${{ secrets.SPARK_API_PASSWORD }}"
+          AUTH_URL="https://spark-api-open.xf-yun.com/v1/chat/completions"
           
-          # 分析配置文件
-          for config_file in .env .dockerignore docker-compose.yml docker-compose.yaml nginx.conf .gitignore; do
-            if [ -f "$config_file" ]; then
-              echo "${config_file}内容:" >> ../project_analysis.txt
-              cat "$config_file" >> ../project_analysis.txt
-            fi
-          done
-          
-          # 检查入口文件
-          if [ -f "package.json" ]; then
-            echo "分析Node.js入口点和依赖项..."
-            # 使用更健壮的方式提取package.json信息
-            if [ -x "$(command -v jq)" ]; then
-              # 如果有jq命令，使用jq解析json
-              MAIN_FILE=$(jq -r '.main // ""' package.json 2>/dev/null || echo "")
-              START_SCRIPT=$(jq -r '.scripts.start // ""' package.json 2>/dev/null || echo "")
-              BUILD_SCRIPT=$(jq -r '.scripts.build // ""' package.json 2>/dev/null || echo "")
-              DEPENDENCIES=$(jq -r '.dependencies // {}' package.json 2>/dev/null || echo "{}")
-              DEV_DEPENDENCIES=$(jq -r '.devDependencies // {}' package.json 2>/dev/null || echo "{}")
-            else
-              # 备用方案：使用更简单的grep模式且添加错误处理
-              MAIN_FILE=$(grep -o '"main"\s*:\s*"[^"]*"' package.json 2>/dev/null | sed 's/.*"main"\s*:\s*"\([^"]*\)".*/\1/' || echo "")
-              START_SCRIPT=$(grep -o '"start"\s*:\s*"[^"]*"' package.json 2>/dev/null | sed 's/.*"start"\s*:\s*"\([^"]*\)".*/\1/' || echo "")
-              BUILD_SCRIPT=$(grep -o '"build"\s*:\s*"[^"]*"' package.json 2>/dev/null | sed 's/.*"build"\s*:\s*"\([^"]*\)".*/\1/' || echo "")
-            fi
-            
-            echo "主入口文件: ${MAIN_FILE:-未指定}" >> ../project_analysis.txt
-            echo "启动脚本: ${START_SCRIPT:-未指定}" >> ../project_analysis.txt
-            echo "构建脚本: ${BUILD_SCRIPT:-未指定}" >> ../project_analysis.txt
-            
-            # 如果有主入口文件，分析其内容
-            if [ -n "$MAIN_FILE" ] && [ -f "$MAIN_FILE" ]; then
-              echo "${MAIN_FILE}内容:" >> ../project_analysis.txt
-              cat "$MAIN_FILE" >> ../project_analysis.txt
-            fi
-            
-            # 常见框架检测
-            if grep -q '"react"' package.json; then
-              echo "检测到React应用" >> ../project_analysis.txt
-              # 查找并分析入口HTML文件
-              if [ -f "public/index.html" ]; then
-                echo "public/index.html内容:" >> ../project_analysis.txt
-                cat "public/index.html" >> ../project_analysis.txt
-              fi
-            elif grep -q '"next"' package.json; then
-              echo "检测到Next.js应用" >> ../project_analysis.txt
-              # 查找next.config.js
-              if [ -f "next.config.js" ]; then
-                echo "next.config.js内容:" >> ../project_analysis.txt
-                cat "next.config.js" >> ../project_analysis.txt
-              fi
-            elif grep -q '"express"' package.json; then
-              echo "检测到Express应用" >> ../project_analysis.txt
-            fi
-            
-          elif [ -f "requirements.txt" ]; then
-            echo "分析Python应用结构..."
-            # 查找可能的Python入口点
-            FLASK_APP=$(grep -l "Flask(" $(find . -name "*.py" 2>/dev/null) 2>/dev/null | head -1 || echo "")
-            DJANGO_APP=$(find . -name "manage.py" 2>/dev/null | head -1 || echo "")
-            FASTAPI_APP=$(grep -l "FastAPI(" $(find . -name "*.py" 2>/dev/null) 2>/dev/null | head -1 || echo "")
-            
-            if [ -n "$FLASK_APP" ]; then
-              echo "检测到Flask应用，入口点: $FLASK_APP" >> ../project_analysis.txt
-              echo "${FLASK_APP}内容:" >> ../project_analysis.txt
-              cat "$FLASK_APP" >> ../project_analysis.txt
-            elif [ -n "$DJANGO_APP" ]; then
-              echo "检测到Django应用，入口点: $DJANGO_APP" >> ../project_analysis.txt
-              echo "${DJANGO_APP}内容:" >> ../project_analysis.txt
-              cat "$DJANGO_APP" >> ../project_analysis.txt
-              # 查找settings.py
-              DJANGO_SETTINGS=$(find . -name "settings.py" 2>/dev/null | head -1 || echo "")
-              if [ -n "$DJANGO_SETTINGS" ]; then
-                echo "Django设置文件: $DJANGO_SETTINGS" >> ../project_analysis.txt
-                echo "${DJANGO_SETTINGS}内容:" >> ../project_analysis.txt
-                cat "$DJANGO_SETTINGS" >> ../project_analysis.txt
-              fi
-            elif [ -n "$FASTAPI_APP" ]; then
-              echo "检测到FastAPI应用，入口点: $FASTAPI_APP" >> ../project_analysis.txt
-              echo "${FASTAPI_APP}内容:" >> ../project_analysis.txt
-              cat "$FASTAPI_APP" >> ../project_analysis.txt
-            fi
+          # 确保密钥存在
+          if [ -z "$SPARK_API_PASSWORD" ]; then
+            echo "错误: 未设置SPARK_API_PASSWORD密钥"
+            exit 1
           fi
-          
-          # 准备提示信息
-          PROMPT="请仔细分析以下源代码仓库，创建一个生产级别的高质量Dockerfile。根据分析结果，考虑：
-
-          1. 分析项目类型和依赖后，选择最合适的基础镜像（优先考虑alpine版本以减小体积）
-          2. 如果项目结构适合，考虑使用多阶段构建来分离构建环境和运行环境
-          3. 仅复制实际需要的文件，避免包含.git、tests等非生产必要目录
-          4. 合理安排层的顺序，将频繁变化的层放在后面以优化缓存
-          5. 尽量合并RUN命令以减少层数
-          6. 构建完成后清理不必要的缓存和临时文件
-          7. 为项目选择合适的端口和启动命令
-          
-          请特别注意:
-          - 认真阅读项目的README文件，了解项目的用途、安装和运行方式
-          - 分析入口文件和配置文件，确保Dockerfile能够正确启动应用
-          - 检查依赖管理文件（如package.json、requirements.txt等）以确定项目依赖
-          - 对于前端项目，需要考虑构建阶段和运行阶段分离
-          - 对于后端应用，确保暴露正确的端口并设置适当的环境变量
-
-          如果遇到构建错误，我会将错误信息提供给您，请根据错误信息修复Dockerfile。我最多会尝试5次生成或修复。"
-          
-          # 根据用户选择的优化选项调整提示
-          AI_OPTION="${{ github.event.inputs.ai_options }}"
-          if [ "$AI_OPTION" == "size" ] || [ -z "$AI_OPTION" ]; then
-            PROMPT="$PROMPT
-
-          您应该特别重视镜像体积的优化，包括：选择最小的基础镜像、删除所有缓存和临时文件、最小化层数、使用多阶段构建减少最终镜像大小。"
-          elif [ "$AI_OPTION" == "security" ]; then
-            PROMPT="$PROMPT
-            
-          您应该特别重视安全性，包括：选择官方维护良好的基础镜像、避免使用root用户、最小化攻击面、仅包含必要组件、移除构建工具和调试信息、扫描已知漏洞。"
-          elif [ "$AI_OPTION" == "speed" ]; then
-            PROMPT="$PROMPT
-            
-          您应该特别重视构建和运行速度，包括：优化构建缓存策略、预安装关键依赖、使用生产模式构建、调整配置参数以提高启动和运行性能、选择性能更好的基础镜像。"
-          fi
-          
-          PROMPT="$PROMPT
-          
-          已收集的项目信息:
-          $(cat ../project_info.txt 2>/dev/null || echo '未找到项目信息')
-          $(cat ../project_analysis.txt 2>/dev/null || echo '')
-          
-          请生成完整的Dockerfile，格式清晰，并添加必要的注释以说明每个指令的用途。如果有任何问题或建议，请在生成后说明。"
-          
-          # 定义修复多阶段构建问题的函数
-          fix_multistage_dockerfile() {
-            local dockerfile="$1"
-            local fixed=false
-            
-            echo "尝试修复多阶段构建问题..."
-            
-            # 检查是否使用了多阶段构建
-            if grep -q "COPY --from=" "$dockerfile"; then
-              # 备份原始文件
-              cp "$dockerfile" "${dockerfile}.bak"
-              
-              # 检查是否是典型的构建+运行两阶段模式
-              if grep -q "FROM .* AS build" "$dockerfile" && grep -q "COPY --from=build" "$dockerfile"; then
-                echo "检测到典型的构建+运行两阶段模式，正在修复..."
-                
-                # 创建新的Dockerfile
-                {
-                  echo "# 第一阶段 - 构建"
-                  sed -n '/FROM .* AS build/,/COPY --from=build/p' "$dockerfile" | grep -v "COPY --from=build"
-                  
-                  echo ""
-                  echo "# 第二阶段 - 运行"
-                  echo "FROM node:14-alpine"
-                  
-                  # 提取第二阶段内容（从COPY --from开始）
-                  sed -n '/COPY --from=build/,$p' "$dockerfile"
-                } > "${dockerfile}.fixed"
-                
-                # 替换原文件
-                mv "${dockerfile}.fixed" "$dockerfile"
-                echo "多阶段构建格式已修复"
-                fixed=true
-              elif grep -q "COPY --from=" "$dockerfile" && ! grep -q "FROM .* AS" "$dockerfile"; then
-                echo "检测到使用了COPY --from但没有定义阶段名称，尝试修复..."
-                
-                # 获取第一个FROM指令
-                local first_from=$(grep -m 1 "^FROM" "$dockerfile")
-                
-                # 创建新的Dockerfile
-                {
-                  echo "# 第一阶段 - 构建"
-                  echo "$first_from AS build"
-                  sed -n '/FROM/,/COPY --from=/p' "$dockerfile" | grep -v "^FROM" | grep -v "COPY --from="
-                  
-                  echo ""
-                  echo "# 第二阶段 - 运行"
-                  echo "FROM node:14-alpine"
-                  
-                  # 提取COPY --from之后的内容，并修复--from参数
-                  sed 's/COPY --from=[^ ]*/COPY --from=build/g' "$dockerfile" | sed -n '/COPY --from=/,$p'
-                } > "${dockerfile}.fixed"
-                
-                # 替换原文件
-                mv "${dockerfile}.fixed" "$dockerfile"
-                echo "多阶段构建格式已修复"
-                fixed=true
-              fi
-            fi
-            
-            # 返回是否修复成功
-            if [ "$fixed" = true ]; then
-              return 0
-            else
-              return 1
-            fi
-          }
-          
-          # 定义修复入口文件问题的函数
-          fix_entrypoint_file() {
-            local dockerfile="$1"
-            local fixed=false
-            
-            echo "尝试修复入口文件问题..."
-            
-            # 提取CMD中引用的JS文件
-            local cmd_file=$(grep -o "^CMD \[\"\(node\|npm\|yarn\).*\".*\"" "$dockerfile" | grep -o "[^\"]*\.js" || echo "")
-            
-            if [ -n "$cmd_file" ] && [ ! -f "$cmd_file" ]; then
-              echo "CMD指令引用的文件 '$cmd_file' 不存在，尝试修复..."
-              
-              # 备份原始文件
-              cp "$dockerfile" "${dockerfile}.bak"
-              
-              # 查找可能的替代入口文件
-              local replacement_file=""
-              
-              # 首先检查package.json中的main字段
-              if [ -f "package.json" ]; then
-                if [ -x "$(command -v jq)" ]; then
-                  replacement_file=$(jq -r '.main // ""' package.json 2>/dev/null || echo "")
-                else
-                  replacement_file=$(grep -o '"main"\s*:\s*"[^"]*"' package.json 2>/dev/null | sed 's/.*"main"\s*:\s*"\([^"]*\)".*/\1/' || echo "")
-                fi
-              fi
-              
-              # 如果package.json中没有main字段或文件不存在，尝试常见的入口文件
-              if [ -z "$replacement_file" ] || [ ! -f "$replacement_file" ]; then
-                for file in "index.js" "app.js" "server.js" "main.js" "src/index.js" "src/app.js" "src/server.js"; do
-                  if [ -f "$file" ]; then
-                    replacement_file="$file"
-                    break
-                  fi
-                done
-              fi
-              
-              # 如果找到了替代文件，修改Dockerfile
-              if [ -n "$replacement_file" ] && [ -f "$replacement_file" ]; then
-                echo "找到替代入口文件: $replacement_file"
-                
-                # 替换CMD指令中的文件名
-                sed "s|CMD \[\"\(node\|npm\|yarn\).*\".*\".*\"\]|CMD [\"node\", \"$replacement_file\"]|g" "$dockerfile" > "${dockerfile}.fixed"
-                
-                # 替换原文件
-                mv "${dockerfile}.fixed" "$dockerfile"
-                echo "入口文件已修复为: $replacement_file"
-                fixed=true
-              else
-                echo "未找到适合的替代入口文件，使用默认的index.js"
-                # 创建一个最小的index.js文件
-                echo "console.log('应用已启动');" > index.js
-                
-                # 替换CMD指令中的文件名
-                sed "s|CMD \[\"\(node\|npm\|yarn\).*\".*\".*\"\]|CMD [\"node\", \"index.js\"]|g" "$dockerfile" > "${dockerfile}.fixed"
-                
-                # 替换原文件
-                mv "${dockerfile}.fixed" "$dockerfile"
-                echo "已创建默认入口文件index.js并修复Dockerfile"
-                fixed=true
-              fi
-            fi
-            
-            # 返回是否修复成功
-            if [ "$fixed" = true ]; then
-              return 0
-            else
-              return 1
-            fi
-          }
-          
-          # 定义Dockerfile优化分析函数
-          analyze_dockerfile_optimizations() {
-            local dockerfile="$1"
-            local analysis_file="$2"
-            
-            echo "分析Dockerfile优化建议..." | tee -a "$analysis_file"
-            
-            # 检查是否使用了alpine基础镜像
-            if ! grep -q "alpine" "$dockerfile"; then
-              echo "建议: 考虑使用alpine版本的基础镜像以减小镜像体积" >> "$analysis_file"
-            fi
-            
-            # 检查是否使用了多阶段构建
-            if ! grep -q "FROM .* AS " "$dockerfile"; then
-              echo "建议: 考虑使用多阶段构建来分离构建环境和运行环境" >> "$analysis_file"
-            fi
-            
-            # 检查RUN指令是否过多
-            local run_count=$(grep -c "^RUN" "$dockerfile")
-            if [ "$run_count" -gt 3 ]; then
-              echo "建议: 合并多个RUN指令以减少镜像层数，当前有 $run_count 个RUN指令" >> "$analysis_file"
-            fi
-            
-            # 检查是否有清理缓存的指令
-            if ! grep -q "rm -rf" "$dockerfile" && ! grep -q "apt-get clean" "$dockerfile" && ! grep -q "apk del" "$dockerfile"; then
-              echo "建议: 添加清理缓存和临时文件的指令以减小镜像体积" >> "$analysis_file"
-            fi
-            
-            # 检查是否使用了非root用户
-            if ! grep -q "^USER" "$dockerfile"; then
-              echo "建议: 考虑添加USER指令以非root用户身份运行应用，提高安全性" >> "$analysis_file"
-            fi
-            
-            # 检查是否有HEALTHCHECK指令
-            if ! grep -q "^HEALTHCHECK" "$dockerfile"; then
-              echo "建议: 添加HEALTHCHECK指令以便Docker可以监控应用的健康状态" >> "$analysis_file"
-            fi
-            
-            # 检查是否有.dockerignore文件
-            if [ ! -f ".dockerignore" ]; then
-              echo "建议: 创建.dockerignore文件以排除不必要的文件，如.git、node_modules等" >> "$analysis_file"
-            fi
-          }
-          
-          # 开始重试生成逻辑
-          MAX_RETRIES=5
-          RETRY_COUNT=0
-          DOCKERFILE_VALID=false
-          
-          # 定义Dockerfile验证函数
-          validate_dockerfile() {
-            local dockerfile="$1"
-            local error_file="$2"
-            local validation_log="$3"
-            local errors=0
-            
-            echo "执行Dockerfile基本验证..."
-            
-            # 检查基本语法
-            if ! grep -q "^FROM" "$dockerfile"; then
-              echo "错误: 缺少FROM指令" >> "$error_file"
-              errors=$((errors+1))
-            fi
-            
-            # 检查是否存在CMD或ENTRYPOINT
-            if ! grep -q "^CMD" "$dockerfile" && ! grep -q "^ENTRYPOINT" "$dockerfile"; then
-              echo "警告: 缺少CMD或ENTRYPOINT指令，应用可能无法自动启动" >> "$error_file"
-            fi
-            
-            # 使用docker buildx进行轻量级验证，主要检查语法
-            echo "使用docker buildx验证Dockerfile语法..."
-            # 使用--progress=plain可以更清晰地显示构建过程
-            docker buildx build --no-cache --progress=plain -t dockerfile-validation-test . > "$validation_log" 2>&1
-            
-            # 检查构建是否成功
-            if [ $? -ne 0 ]; then
-              echo "构建失败，分析错误信息..." >> "$error_file"
-              
-              # 提取和分类常见错误信息
-              if grep -q "no such file or directory" "$validation_log"; then
-                missing_file=$(grep -o "no such file or directory: [^ ]*" "$validation_log" | sed 's/no such file or directory: //' | head -1)
-                echo "错误: 找不到文件: $missing_file" >> "$error_file"
-                echo "建议: 确保该文件存在或修改COPY/ADD指令的源路径" >> "$error_file"
-              fi
-              
-              if grep -q "permission denied" "$validation_log"; then
-                echo "错误: 权限被拒绝" >> "$error_file"
-                echo "建议: 检查文件权限或添加适当的USER指令" >> "$error_file"
-              fi
-              
-              if grep -q "unknown instruction:" "$validation_log"; then
-                unknown_instr=$(grep -o "unknown instruction: [^ ]*" "$validation_log" | sed 's/unknown instruction: //' | head -1)
-                echo "错误: 未知指令: $unknown_instr" >> "$error_file"
-                echo "建议: 检查拼写或语法错误" >> "$error_file"
-              fi
-              
-              if grep -q "from unknown stage" "$validation_log"; then
-                stage_name=$(grep -o "from unknown stage: [^ ]*" "$validation_log" | sed 's/from unknown stage: //' | head -1)
-                echo "错误: 引用了未定义的构建阶段: $stage_name" >> "$error_file"
-                echo "建议: 确保在多阶段构建中正确定义了所有阶段" >> "$error_file"
-              fi
-              
-              # 提取更多详细错误信息以帮助诊断
-              echo "构建日志摘要 (最后20行):" >> "$error_file"
-              tail -n 20 "$validation_log" >> "$error_file"
-              
-              # 计算错误数，但不要太严格
-              errors=1
-            else
-              echo "Dockerfile语法验证成功！" >> "$error_file"
-            fi
-            
-            return $errors
-          }
-          
-          # 循环尝试生成Dockerfile，直到成功或达到最大重试次数
-          while [ $RETRY_COUNT -lt $MAX_RETRIES ] && [ "$DOCKERFILE_VALID" != "true" ]; do
-            RETRY_COUNT=$((RETRY_COUNT + 1))
-            
-            if [ $RETRY_COUNT -gt 1 ]; then
-              echo "第 $RETRY_COUNT 次尝试生成或修复Dockerfile (最多 $MAX_RETRIES 次)..."
-              # 如果是重试，添加错误信息到提示中
-              if [ -f "../dockerfile_error.txt" ]; then
-                ERROR_FEEDBACK=$(cat ../dockerfile_error.txt)
-                
-                # 使用多个echo命令替代heredoc
-                echo "上次生成的Dockerfile存在以下问题：" > ../retry_prompt.txt
-                echo "" >> ../retry_prompt.txt
-                echo "$ERROR_FEEDBACK" >> ../retry_prompt.txt
-                echo "" >> ../retry_prompt.txt
-                echo "请根据以上错误信息修复Dockerfile。这是第 $RETRY_COUNT 次尝试，共有 $MAX_RETRIES 次机会。请确保:" >> ../retry_prompt.txt
-                echo "1. 解决所有报告的错误" >> ../retry_prompt.txt
-                echo "2. 确保所有COPY/ADD指令引用的文件确实存在" >> ../retry_prompt.txt
-                echo "3. 如果使用多阶段构建，确保阶段名称正确" >> ../retry_prompt.txt
-                echo "4. 根据项目类型提供正确的CMD或ENTRYPOINT指令" >> ../retry_prompt.txt
-                
-                RETRY_PROMPT=$(cat ../retry_prompt.txt)
-                PROMPT="$PROMPT\n\n$RETRY_PROMPT"
-              fi
-            fi
-            
-            # 将PROMPT保存为文件
-            echo "$PROMPT" > ../prompt.txt
-            
-            # 如果存在构建错误反馈，将其添加到提示中
-            if [ -n "$BUILD_ERROR_FEEDBACK" ]; then
-              echo "检测到构建错误，将错误信息提供给AI以重新生成Dockerfile..."
-              
-              # 使用多个echo命令替代heredoc
-              echo "上次生成的Dockerfile构建失败，以下是错误信息和分析：" > ../build_error_prompt.txt
-              echo "" >> ../build_error_prompt.txt
-              echo "$BUILD_ERROR_FEEDBACK" >> ../build_error_prompt.txt
-              echo "" >> ../build_error_prompt.txt
-              echo "请根据以上错误分析修复Dockerfile，确保它能够正确构建。特别注意：" >> ../build_error_prompt.txt
-              echo "1. 确保使用正确的基础镜像和依赖安装命令" >> ../build_error_prompt.txt
-              echo "2. 确保文件路径正确，COPY/ADD指令引用的所有文件都存在" >> ../build_error_prompt.txt
-              echo "3. 提供正确的启动命令" >> ../build_error_prompt.txt
-              echo "4. 如使用多阶段构建，确保阶段名称引用正确" >> ../build_error_prompt.txt
-              
-              # 将错误提示添加到prompt中
-              cat ../build_error_prompt.txt >> ../prompt.txt
-              
-              # 清除环境变量，避免重复添加
-              BUILD_ERROR_FEEDBACK=""
-            fi
-            
-            # 配置讯飞星火API参数
-            # 使用HTTP服务接口认证信息中的APIPassword
-            SPARK_API_PASSWORD="${{ secrets.SPARK_API_PASSWORD }}"
-            
-            # 检查密钥是否设置
-            if [ -z "$SPARK_API_PASSWORD" ]; then
-              echo "错误: 未设置SPARK_API_PASSWORD密钥。请在GitHub仓库的Settings > Secrets > Actions中添加此密钥。"
-              echo "密钥值应为讯飞星火HTTP服务接口认证信息中的APIPassword。"
-              exit 1
-            fi
-            
-            # 生成请求URL
-            AUTH_URL="https://spark-api-open.xf-yun.com/v1/chat/completions"
-            
-            # 读取PROMPT内容并转义为JSON字符串
-            PROMPT_CONTENT=$(cat ../prompt.txt | sed 's/"/\\"/g' | tr '\n' ' ')
-            
-            # 构建请求体JSON - 参考Python示例，但使用非流式响应
-            echo '{
-              "model": "lite",
-              "user": "github-actions-user",
-              "messages": [
-                {
-                  "role": "user",
-                  "content": "'$PROMPT_CONTENT'"
-                }
-              ],
-              "temperature": 0.5,
-              "max_tokens": 4096,
-              "stream": false
-            }' > ../spark_request.json
-            
-            # 执行HTTP请求
-            echo "调用讯飞星火API生成Dockerfile..."
-            curl -v -X POST "$AUTH_URL" \
-              -H "Content-Type: application/json" \
-              -H "Authorization: Bearer $SPARK_API_PASSWORD" \
-              -d @../spark_request.json > ../ai_response.json 2> ../ai_response_headers.txt
-            
-            # 检查API调用是否成功
-            if [ $? -ne 0 ]; then
-              echo "讯飞星火API调用失败"
-              cat ../ai_response_headers.txt
-              exit 1
-            fi
-            
-            # 显示API响应状态和详细信息
-            echo "API响应头和状态码:"
-            cat ../ai_response_headers.txt
-            
-            echo "API响应内容:"
-            cat ../ai_response.json
-            
-            # 检查是否包含错误
-            if grep -q "\"error\":" ../ai_response.json; then
-              echo "API返回错误信息:"
-              jq -r '.error.message // "未知错误"' ../ai_response.json 2>/dev/null || cat ../ai_response.json
-              exit 1
-            fi
-            
-            # 检查响应中是否有code字段
-            CODE=$(jq -r '.code // "未返回code"' ../ai_response.json 2>/dev/null || echo "未返回code")
-            if [ "$CODE" != "0" ] && [ "$CODE" != "未返回code" ]; then
-              echo "讯飞星火API返回错误，错误代码: $CODE"
-              echo "错误信息: $(jq -r '.message // "未知错误"' ../ai_response.json 2>/dev/null || echo "未知错误")"
-              exit 1
-            fi
-            
-            # 尝试两种可能的响应格式提取内容
-            if jq -e '.choices[0].message.content' ../ai_response.json > /dev/null 2>&1; then
-              # 标准OpenAI格式
-              jq -r '.choices[0].message.content' ../ai_response.json > Dockerfile.raw
-            elif jq -e '.payload.choices.text[0].content' ../ai_response.json > /dev/null 2>&1; then
-              # 讯飞星火可能的另一种格式
-              jq -r '.payload.choices.text[0].content' ../ai_response.json > Dockerfile.raw
-            else
-              # 如果上面都失败，尝试直接提取所有文本内容
-              cat ../ai_response.json > Dockerfile.raw
-            fi
-            
-            # 彻底清理Dockerfile内容，移除所有markdown格式和无效内容
-            echo "清理Dockerfile格式..."
-            # 临时文件用于处理
-            cat Dockerfile.raw | grep -v '^\s*```' | grep -v '^\s*$' > Dockerfile.tmp
-            
-            # 检查是否包含FROM指令
-            if grep -q "^FROM" Dockerfile.tmp; then
-              # 提取有效Dockerfile内容 - 确保只包含有效指令
-              echo "提取有效Dockerfile内容..."
-              grep -E "^(FROM|COPY|ADD|RUN|WORKDIR|ENV|ARG|EXPOSE|CMD|ENTRYPOINT|VOLUME|USER|ONBUILD|STOPSIGNAL|HEALTHCHECK|SHELL)" Dockerfile.tmp > Dockerfile
-              
-              # 检查多阶段构建格式
-              STAGES=$(grep -E "FROM .+ AS [a-zA-Z0-9_-]+" Dockerfile | wc -l)
-              COPY_FROM=$(grep -E "COPY --from=" Dockerfile | wc -l)
-              
-              # 如果使用了COPY --from但没有足够的构建阶段，尝试修复
-              if [ "$COPY_FROM" -gt 0 ] && [ "$STAGES" -lt 2 ]; then
-                echo "检测到多阶段构建问题，尝试修复..."
-                
-                # 检查是否是典型的构建+运行两阶段模式
-                if grep -q "FROM .* AS build" Dockerfile && grep -q "COPY --from=build" Dockerfile; then
-                  echo "检测到典型的构建+运行两阶段模式，正在修复..."
-                  
-                  # 创建新的Dockerfile
-                  echo "# 第一阶段 - 构建" > Dockerfile.new
-                  sed -n '/FROM .* AS build/,/COPY --from=build/p' Dockerfile | grep -v "COPY --from=build" >> Dockerfile.new
-                  
-                  echo "" >> Dockerfile.new
-                  echo "# 第二阶段 - 运行" >> Dockerfile.new
-                  echo "FROM node:14-alpine" >> Dockerfile.new
-                  
-                  # 提取第二阶段内容（从COPY --from开始）
-                  sed -n '/COPY --from=build/,$p' Dockerfile >> Dockerfile.new
-                  
-                  # 替换原文件
-                  mv Dockerfile.new Dockerfile
-                  echo "多阶段构建格式已修复"
-                fi
-              fi
-            else
-              # 创建基本Dockerfile
-              echo "未找到有效的Dockerfile指令，创建基本Dockerfile..."
-              echo "FROM node:14-alpine" > Dockerfile
-              echo "WORKDIR /app" >> Dockerfile
-              echo "COPY . ." >> Dockerfile
-              echo "RUN if [ -f \"package.json\" ]; then npm install; fi" >> Dockerfile
-              echo "CMD [\"npm\", \"start\"]" >> Dockerfile
-            fi
-            
-            echo "生成的Dockerfile内容:"
-            cat Dockerfile
-            
-            # 验证Dockerfile
-            echo "验证Dockerfile..."
-            # 清空错误文件
-            > ../dockerfile_error.txt
-            
-            # 使用验证函数
-            validate_dockerfile "Dockerfile" "../dockerfile_error.txt" "../dockerfile_validation.log"
-            VALIDATION_RESULT=$?
-            
-            # 检查验证结果
-            if [ $VALIDATION_RESULT -eq 0 ]; then
-              echo "Dockerfile验证通过！"
-              DOCKERFILE_VALID=true
-              
-              # 进行优化分析
-              echo "进行Dockerfile优化分析..."
-              analyze_dockerfile_optimizations "Dockerfile" "../dockerfile_optimizations.txt"
-              
-              # 显示优化建议
-              if [ -f "../dockerfile_optimizations.txt" ]; then
-                echo "优化建议:"
-                cat ../dockerfile_optimizations.txt
-              fi
-              
-              break
-            else
-              echo "Dockerfile验证失败，发现 $VALIDATION_RESULT 个问题"
-              echo "错误详情:"
-              cat ../dockerfile_error.txt
-              
-              # 尝试自动修复常见问题
-              FIXED=false
-              
-              # 检查是否是多阶段构建问题
-              if grep -q "COPY --from=" Dockerfile && grep -q "COPY --from=" ../dockerfile_validation.log; then
-                echo "检测到多阶段构建问题，尝试自动修复..."
-                fix_multistage_dockerfile "Dockerfile"
-                if [ $? -eq 0 ]; then
-                  FIXED=true
-                  echo "多阶段构建问题已修复，重新验证..."
-                  # 重新验证修复后的Dockerfile
-                  validate_dockerfile "Dockerfile" "../dockerfile_error.txt.new" "../dockerfile_validation.log.new"
-                  if [ $? -eq 0 ]; then
-                    echo "修复成功！Dockerfile现在有效"
-                    DOCKERFILE_VALID=true
-                    break
-                  else
-                    echo "自动修复后仍有问题，需要进一步调整"
-                    cat ../dockerfile_error.txt.new > ../dockerfile_error.txt
-                  fi
-                fi
-              fi
-              
-              # 检查是否是入口文件问题
-              if grep -q "CMD" Dockerfile && grep -q "CMD" ../dockerfile_validation.log; then
-                echo "检测到入口文件问题，尝试自动修复..."
-                fix_entrypoint_file "Dockerfile"
-                if [ $? -eq 0 ]; then
-                  FIXED=true
-                  echo "入口文件问题已修复，重新验证..."
-                  # 重新验证修复后的Dockerfile
-                  validate_dockerfile "Dockerfile" "../dockerfile_error.txt.new" "../dockerfile_validation.log.new"
-                  if [ $? -eq 0 ]; then
-                    echo "修复成功！Dockerfile现在有效"
-                    DOCKERFILE_VALID=true
-                    break
-                  else
-                    echo "自动修复后仍有问题，需要进一步调整"
-                    cat ../dockerfile_error.txt.new > ../dockerfile_error.txt
-                  fi
-                fi
-              fi
-              
-              # 如果没有成功修复，添加到错误反馈中
-              if [ "$FIXED" != "true" ]; then
-                # 分析常见错误并提供具体修复建议
-                if grep -q "requires exactly 1 argument" ../dockerfile_validation.log; then
-                  echo "建议: FROM指令需要指定基础镜像，例如 FROM node:14-alpine" >> ../dockerfile_error.txt
-                elif grep -q "COPY --from=" ../dockerfile_validation.log; then
-                  echo "建议: 多阶段构建需要为每个阶段定义名称，例如 FROM node:14-alpine AS build" >> ../dockerfile_error.txt
-                elif grep -q "not found: manifest unknown" ../dockerfile_validation.log; then
-                  echo "建议: 请使用有效的基础镜像，例如 node:14-alpine, python:3.9-alpine 等" >> ../dockerfile_error.txt
-                fi
-              fi
-              
-              # 如果达到最大重试次数，则放弃
-              if [ $RETRY_COUNT -ge $MAX_RETRIES ]; then
-                echo "达到最大重试次数($MAX_RETRIES)，无法生成有效的Dockerfile"
-                echo "将使用基本的Dockerfile作为后备..."
-                # 创建基本的后备Dockerfile
-                echo "FROM node:14-alpine" > Dockerfile
-                echo "WORKDIR /app" >> Dockerfile
-                echo "COPY package*.json ./" >> Dockerfile
-                echo "RUN npm install --production" >> Dockerfile
-                echo "COPY . ." >> Dockerfile
-                echo "CMD [\"npm\", \"start\"]" >> Dockerfile
-              fi
-            fi
-          done
-          
-          echo "最终生成的Dockerfile:"
-          cat Dockerfile
-        shell: bash
 
       # 验证AI生成的Dockerfile
       - name: 验证Dockerfile

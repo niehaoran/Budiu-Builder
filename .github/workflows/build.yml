@@ -91,9 +91,9 @@ jobs:
       - name: 使用Buildpacks构建镜像
         run: |
           cd src
-          pack build ${{ github.event.inputs.image_name }}:${{ github.event.inputs.image_tag }} \
+          pack build ${{ github.event.inputs.registry }}/${{ github.event.inputs.image_name }}:${{ github.event.inputs.image_tag }} \
             --builder paketobuildpacks/builder:base \
-            --publish ${{ github.event.inputs.registry }}/${{ github.event.inputs.image_name }}:${{ github.event.inputs.image_tag }}
+            --publish
         shell: bash
 
       - name: 通知构建完成

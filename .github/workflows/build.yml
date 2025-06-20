@@ -104,8 +104,20 @@ jobs:
       # 设置GitHub CLI与Copilot支持
       - name: 设置GitHub CLI与Copilot支持
         run: |
-          gh extension install github/gh-copilot
+          # 安装GitHub CLI扩展
+          gh extension install github/gh-copilot || {
+            echo "GitHub Copilot扩展安装失败，AI不可用"
+            exit 1
+          }
           echo "已安装GitHub Copilot CLI扩展"
+          
+          # 验证扩展是否正确安装
+          if gh extension list | grep -q copilot; then
+            echo "GitHub Copilot CLI扩展安装成功"
+          else
+            echo "GitHub Copilot CLI扩展不可用，AI功能无法使用"
+            exit 1
+          fi
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
@@ -162,17 +174,27 @@ jobs:
           # 检查入口文件
           if [ -f "package.json" ]; then
             echo "分析Node.js入口点和依赖项..."
-            MAIN_FILE=$(grep -o '"main":[[:space:]]*"[^"]*"' package.json | cut -d'"' -f4)
-            START_SCRIPT=$(grep -o '"start":[[:space:]]*"[^"]*"' package.json | cut -d'"' -f4)
-            BUILD_SCRIPT=$(grep -o '"build":[[:space:]]*"[^"]*"' package.json | cut -d'"' -f4)
-            echo "主入口文件: $MAIN_FILE" >> ../project_analysis.txt
-            echo "启动脚本: $START_SCRIPT" >> ../project_analysis.txt
-            echo "构建脚本: $BUILD_SCRIPT" >> ../project_analysis.txt
+            # 使用更健壮的方式提取package.json信息
+            if [ -x "$(command -v jq)" ]; then
+              # 如果有jq命令，使用jq解析json
+              MAIN_FILE=$(jq -r '.main // ""' package.json 2>/dev/null || echo "")
+              START_SCRIPT=$(jq -r '.scripts.start // ""' package.json 2>/dev/null || echo "")
+              BUILD_SCRIPT=$(jq -r '.scripts.build // ""' package.json 2>/dev/null || echo "")
+            else
+              # 备用方案：使用更简单的grep模式且添加错误处理
+              MAIN_FILE=$(grep -o '"main"\s*:\s*"[^"]*"' package.json 2>/dev/null | sed 's/.*"main"\s*:\s*"\([^"]*\)".*/\1/' || echo "")
+              START_SCRIPT=$(grep -o '"start"\s*:\s*"[^"]*"' package.json 2>/dev/null | sed 's/.*"start"\s*:\s*"\([^"]*\)".*/\1/' || echo "")
+              BUILD_SCRIPT=$(grep -o '"build"\s*:\s*"[^"]*"' package.json 2>/dev/null | sed 's/.*"build"\s*:\s*"\([^"]*\)".*/\1/' || echo "")
+            fi
+            
+            echo "主入口文件: ${MAIN_FILE:-未指定}" >> ../project_analysis.txt
+            echo "启动脚本: ${START_SCRIPT:-未指定}" >> ../project_analysis.txt
+            echo "构建脚本: ${BUILD_SCRIPT:-未指定}" >> ../project_analysis.txt
           elif [ -f "requirements.txt" ]; then
             echo "分析Python应用结构..."
             # 查找可能的Python入口点
-            FLASK_APP=$(grep -l "Flask(" $(find . -name "*.py") | head -1)
-            DJANGO_APP=$(find . -name "manage.py" | head -1)
+            FLASK_APP=$(grep -l "Flask(" $(find . -name "*.py" 2>/dev/null) 2>/dev/null | head -1 || echo "")
+            DJANGO_APP=$(find . -name "manage.py" 2>/dev/null | head -1 || echo "")
             if [ -n "$FLASK_APP" ]; then
               echo "检测到Flask应用，入口点: $FLASK_APP" >> ../project_analysis.txt
             elif [ -n "$DJANGO_APP" ]; then
@@ -208,25 +230,24 @@ jobs:
           PROMPT="$PROMPT
           
           已收集的项目信息:
-          $(cat ../project_info.txt)
+          $(cat ../project_info.txt 2>/dev/null || echo '未找到项目信息')
           $(cat ../project_analysis.txt 2>/dev/null || echo '')
           
           请生成完整的Dockerfile，不要包含任何注释或解释:"
           
           # 调用GitHub Copilot CLI
-          echo "$PROMPT" | gh copilot suggest -t dockerfile > ../dockerfile_gen.txt
+          echo "$PROMPT" | gh copilot suggest -t dockerfile > ../dockerfile_gen.txt || {
+            echo "GitHub Copilot CLI调用失败，AI不可用"
+            exit 1
+          }
           
           # 提取生成的Dockerfile
           sed -n '/```dockerfile/,/```/p' ../dockerfile_gen.txt | grep -v '```' > Dockerfile
           
           # 检查生成结果
           if [ ! -s Dockerfile ]; then
-            echo "AI生成Dockerfile失败，创建基础Dockerfile..."
-            echo "FROM node:16-alpine" > Dockerfile
-            echo "WORKDIR /app" >> Dockerfile
-            echo "COPY . ." >> Dockerfile
-            echo "RUN if [ -f \"package.json\" ]; then npm install; fi" >> Dockerfile
-            echo "CMD [\"npm\", \"start\"]" >> Dockerfile
+            echo "AI生成Dockerfile失败，无有效输出"
+            exit 1
           else
             echo "AI已成功生成Dockerfile:"
             cat Dockerfile

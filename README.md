@@ -34,7 +34,7 @@ Budiu-Builder是一个基于GitHub Actions的自动构建系统，用于将GitHu
    ```
 3. 将其更改为您的GitHub用户名和仓库名:
    ```javascript
-   const DEFAULT_REPO = 'your-actual-username/Budiu-Builder';
+   const DEFAULT_REPO = 'niehaoran/Budiu-Builder';
    ```
 4. 保存并提交更改
 
@@ -47,7 +47,7 @@ Budiu-Builder是一个基于GitHub Actions的自动构建系统，用于将GitHu
 1. 在仓库的"Settings"选项卡中，找到"Pages"部分
 2. 在"Source"下拉菜单中选择"main branch"和"/docs"文件夹
 3. 点击"Save"按钮
-4. GitHub会生成一个URL（通常是 `https://{username}.github.io/Budiu-Builder`）
+4. GitHub会生成一个URL（通常是 `https://niehaoran.github.io/Budiu-Builder`）
 5. 部署完成后，用户可以通过该URL访问Web界面
 
 ### 安全性说明

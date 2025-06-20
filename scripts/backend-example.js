@@ -6,7 +6,7 @@ const port = process.env.PORT || 3000;
 
 // 环境变量配置
 const GITHUB_TOKEN = process.env.GITHUB_TOKEN;
-const GITHUB_REPOSITORY = process.env.GITHUB_REPOSITORY || 'your-username/Budiu-Builder';
+const GITHUB_REPOSITORY = process.env.GITHUB_REPOSITORY || 'niehaoran/Budiu-Builder';
 const BACKEND_API_KEY = process.env.BACKEND_API_KEY || 'your-api-key';
 
 // 中间件

@@ -17,7 +17,7 @@ document.addEventListener('DOMContentLoaded', function () {
 
   // GitHub Actions相关配置
   const GITHUB_API_ENDPOINT = 'https://api.github.com/repos';
-  const DEFAULT_REPO = 'your-username/Budiu-Builder'; // 更改为您的仓库
+  const DEFAULT_REPO = 'niehaoran/Budiu-Builder'; // 已更新为实际仓库
   const ACTIONS_WORKFLOW = 'build.yml';
 
   // 显示当前仓库配置

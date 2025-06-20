@@ -225,10 +225,122 @@ jobs:
           
           请生成完整的Dockerfile，不要包含任何注释或解释。"
           
+          # 定义修复多阶段构建问题的函数
+          fix_multistage_dockerfile() {
+            local dockerfile="$1"
+            local fixed=false
+            
+            echo "尝试修复多阶段构建问题..."
+            
+            # 检查是否使用了多阶段构建
+            if grep -q "COPY --from=" "$dockerfile"; then
+              # 备份原始文件
+              cp "$dockerfile" "${dockerfile}.bak"
+              
+              # 检查是否是典型的构建+运行两阶段模式
+              if grep -q "FROM .* AS build" "$dockerfile" && grep -q "COPY --from=build" "$dockerfile"; then
+                echo "检测到典型的构建+运行两阶段模式，正在修复..."
+                
+                # 创建新的Dockerfile
+                {
+                  echo "# 第一阶段 - 构建"
+                  sed -n '/FROM .* AS build/,/COPY --from=build/p' "$dockerfile" | grep -v "COPY --from=build"
+                  
+                  echo ""
+                  echo "# 第二阶段 - 运行"
+                  echo "FROM node:14-alpine"
+                  
+                  # 提取第二阶段内容（从COPY --from开始）
+                  sed -n '/COPY --from=build/,$p' "$dockerfile"
+                } > "${dockerfile}.fixed"
+                
+                # 替换原文件
+                mv "${dockerfile}.fixed" "$dockerfile"
+                echo "多阶段构建格式已修复"
+                fixed=true
+              elif grep -q "COPY --from=" "$dockerfile" && ! grep -q "FROM .* AS" "$dockerfile"; then
+                echo "检测到使用了COPY --from但没有定义阶段名称，尝试修复..."
+                
+                # 获取第一个FROM指令
+                local first_from=$(grep -m 1 "^FROM" "$dockerfile")
+                
+                # 创建新的Dockerfile
+                {
+                  echo "# 第一阶段 - 构建"
+                  echo "$first_from AS build"
+                  sed -n '/FROM/,/COPY --from=/p' "$dockerfile" | grep -v "^FROM" | grep -v "COPY --from="
+                  
+                  echo ""
+                  echo "# 第二阶段 - 运行"
+                  echo "FROM node:14-alpine"
+                  
+                  # 提取COPY --from之后的内容，并修复--from参数
+                  sed 's/COPY --from=[^ ]*/COPY --from=build/g' "$dockerfile" | sed -n '/COPY --from=/,$p'
+                } > "${dockerfile}.fixed"
+                
+                # 替换原文件
+                mv "${dockerfile}.fixed" "$dockerfile"
+                echo "多阶段构建格式已修复"
+                fixed=true
+              fi
+            fi
+            
+            # 返回是否修复成功
+            if [ "$fixed" = true ]; then
+              return 0
+            else
+              return 1
+            fi
+          }
+          
           # 开始重试生成逻辑
           MAX_RETRIES=5
           RETRY_COUNT=0
           DOCKERFILE_VALID=false
+          
+          # 定义Dockerfile验证函数
+          validate_dockerfile() {
+            local dockerfile="$1"
+            local error_file="$2"
+            local validation_log="$3"
+            local errors=0
+            
+            echo "执行Dockerfile语法和最佳实践验证..."
+            
+            # 检查基本语法
+            if ! grep -q "^FROM" "$dockerfile"; then
+              echo "错误: 缺少FROM指令" >> "$error_file"
+              errors=$((errors+1))
+            fi
+            
+            # 检查多阶段构建问题
+            local stages=$(grep -E "FROM .+ AS [a-zA-Z0-9_-]+" "$dockerfile" | wc -l)
+            local copy_from=$(grep -E "COPY --from=" "$dockerfile" | wc -l)
+            
+            if [ "$copy_from" -gt 0 ] && [ "$stages" -lt "$copy_from" ]; then
+              echo "错误: 多阶段构建中COPY --from引用的阶段数量不匹配" >> "$error_file"
+              errors=$((errors+1))
+            fi
+            
+            # 检查是否存在CMD或ENTRYPOINT
+            if ! grep -q "^CMD" "$dockerfile" && ! grep -q "^ENTRYPOINT" "$dockerfile"; then
+              echo "警告: 缺少CMD或ENTRYPOINT指令" >> "$error_file"
+            fi
+            
+            # 使用docker buildx验证构建
+            echo "使用docker buildx验证Dockerfile..."
+            docker buildx build -t dockerfile-validation-test . > "$validation_log" 2>&1
+            
+            # 检查构建是否成功
+            if [ $? -ne 0 ]; then
+              echo "错误: Docker构建失败" >> "$error_file"
+              # 提取错误信息
+              grep -A 5 "ERROR:" "$validation_log" | head -6 >> "$error_file"
+              errors=$((errors+1))
+            fi
+            
+            return $errors
+          }
           
           # 循环尝试生成Dockerfile，直到成功或达到最大重试次数
           while [ $RETRY_COUNT -lt $MAX_RETRIES ] && [ "$DOCKERFILE_VALID" != "true" ]; do
@@ -337,6 +449,35 @@ jobs:
               # 提取有效Dockerfile内容 - 确保只包含有效指令
               echo "提取有效Dockerfile内容..."
               grep -E "^(FROM|COPY|ADD|RUN|WORKDIR|ENV|ARG|EXPOSE|CMD|ENTRYPOINT|VOLUME|USER|ONBUILD|STOPSIGNAL|HEALTHCHECK|SHELL)" Dockerfile.tmp > Dockerfile
+              
+              # 检查多阶段构建格式
+              STAGES=$(grep -E "FROM .+ AS [a-zA-Z0-9_-]+" Dockerfile | wc -l)
+              COPY_FROM=$(grep -E "COPY --from=" Dockerfile | wc -l)
+              
+              # 如果使用了COPY --from但没有足够的构建阶段，尝试修复
+              if [ "$COPY_FROM" -gt 0 ] && [ "$STAGES" -lt 2 ]; then
+                echo "检测到多阶段构建问题，尝试修复..."
+                
+                # 检查是否是典型的构建+运行两阶段模式
+                if grep -q "FROM .* AS build" Dockerfile && grep -q "COPY --from=build" Dockerfile; then
+                  echo "检测到典型的构建+运行两阶段模式，正在修复..."
+                  
+                  # 创建新的Dockerfile
+                  echo "# 第一阶段 - 构建" > Dockerfile.new
+                  sed -n '/FROM .* AS build/,/COPY --from=build/p' Dockerfile | grep -v "COPY --from=build" >> Dockerfile.new
+                  
+                  echo "" >> Dockerfile.new
+                  echo "# 第二阶段 - 运行" >> Dockerfile.new
+                  echo "FROM node:14-alpine" >> Dockerfile.new
+                  
+                  # 提取第二阶段内容（从COPY --from开始）
+                  sed -n '/COPY --from=build/,$p' Dockerfile >> Dockerfile.new
+                  
+                  # 替换原文件
+                  mv Dockerfile.new Dockerfile
+                  echo "多阶段构建格式已修复"
+                fi
+              fi
             else
               # 创建基本Dockerfile
               echo "未找到有效的Dockerfile指令，创建基本Dockerfile..."
@@ -352,21 +493,57 @@ jobs:
             
             # 验证Dockerfile
             echo "验证Dockerfile..."
-            # 检查是否存在循环依赖等问题
-            docker buildx build -t dockerfile-validation-test . > ../dockerfile_validation.log 2>&1
+            # 清空错误文件
+            > ../dockerfile_error.txt
             
-            # 检查构建是否成功
-            if [ $? -eq 0 ]; then
+            # 使用验证函数
+            validate_dockerfile "Dockerfile" "../dockerfile_error.txt" "../dockerfile_validation.log"
+            VALIDATION_RESULT=$?
+            
+            # 检查验证结果
+            if [ $VALIDATION_RESULT -eq 0 ]; then
               echo "Dockerfile验证通过！"
               DOCKERFILE_VALID=true
               break
             else
-              echo "Dockerfile验证失败，查找错误原因..."
+              echo "Dockerfile验证失败，发现 $VALIDATION_RESULT 个问题"
+              echo "错误详情:"
+              cat ../dockerfile_error.txt
               
-              # 提取错误信息
-              ERROR_MSG=$(grep -A 5 "ERROR:" ../dockerfile_validation.log | head -6)
-              echo "$ERROR_MSG" > ../dockerfile_error.txt
-              echo "错误信息: $ERROR_MSG"
+              # 尝试自动修复常见问题
+              FIXED=false
+              
+              # 检查是否是多阶段构建问题
+              if grep -q "COPY --from=" Dockerfile && grep -q "COPY --from=" ../dockerfile_validation.log; then
+                echo "检测到多阶段构建问题，尝试自动修复..."
+                fix_multistage_dockerfile "Dockerfile"
+                if [ $? -eq 0 ]; then
+                  FIXED=true
+                  echo "多阶段构建问题已修复，重新验证..."
+                  # 重新验证修复后的Dockerfile
+                  validate_dockerfile "Dockerfile" "../dockerfile_error.txt.new" "../dockerfile_validation.log.new"
+                  if [ $? -eq 0 ]; then
+                    echo "修复成功！Dockerfile现在有效"
+                    DOCKERFILE_VALID=true
+                    break
+                  else
+                    echo "自动修复后仍有问题，需要进一步调整"
+                    cat ../dockerfile_error.txt.new > ../dockerfile_error.txt
+                  fi
+                fi
+              fi
+              
+              # 如果没有成功修复，添加到错误反馈中
+              if [ "$FIXED" != "true" ]; then
+                # 分析常见错误并提供具体修复建议
+                if grep -q "requires exactly 1 argument" ../dockerfile_validation.log; then
+                  echo "建议: FROM指令需要指定基础镜像，例如 FROM node:14-alpine" >> ../dockerfile_error.txt
+                elif grep -q "COPY --from=" ../dockerfile_validation.log; then
+                  echo "建议: 多阶段构建需要为每个阶段定义名称，例如 FROM node:14-alpine AS build" >> ../dockerfile_error.txt
+                elif grep -q "not found: manifest unknown" ../dockerfile_validation.log; then
+                  echo "建议: 请使用有效的基础镜像，例如 node:14-alpine, python:3.9-alpine 等" >> ../dockerfile_error.txt
+                fi
+              fi
               
               # 如果达到最大重试次数，则放弃
               if [ $RETRY_COUNT -ge $MAX_RETRIES ]; then

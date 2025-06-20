@@ -11,11 +11,9 @@ document.addEventListener('DOMContentLoaded', function () {
   const imageUrlDisplay = document.getElementById('imageUrl');
   const refreshStatusButton = document.getElementById('refreshStatus');
   const rememberCheckbox = document.getElementById('rememberNonSensitive');
-  const apiEndpointInput = document.getElementById('apiEndpoint');
 
   // 非敏感字段列表
   const nonSensitiveFields = ['repoUrl', 'branch', 'imageName', 'imageTag', 'registry', 'callbackUrl', 'dockerUsername'];
-  const sensitiveFields = ['dockerPassword', 'repoToken', 'githubToken'];
 
   // GitHub Actions相关配置
   const GITHUB_API_ENDPOINT = 'https://api.github.com/repos';
@@ -40,13 +38,6 @@ document.addEventListener('DOMContentLoaded', function () {
     `;
     document.querySelector('main').insertBefore(warningDiv, buildForm.parentNode);
   }
-
-  // 检查localStorage中是否有保存的API端点
-  if (localStorage.getItem('apiEndpoint')) {
-    apiEndpointInput.value = localStorage.getItem('apiEndpoint');
-  }
-
-  let currentBuildId = null;
 
   // 恢复保存的非敏感表单数据
   loadSavedFormData();
@@ -86,11 +77,10 @@ document.addEventListener('DOMContentLoaded', function () {
 
   // 刷新状态按钮
   refreshStatusButton.addEventListener('click', function () {
-    const apiEndpoint = document.getElementById('apiEndpoint').value.trim();
     const buildId = buildIdDisplay.textContent;
 
     if (buildId) {
-      fetchBuildStatus(buildId, apiEndpoint);
+      alert('此版本不支持通过API刷新状态。请前往GitHub Actions页面查看最新状态。');
     }
   });
 
@@ -211,65 +201,6 @@ document.addEventListener('DOMContentLoaded', function () {
       });
   }
 
-  // 获取构建状态
-  function fetchBuildStatus(buildId, apiEndpoint) {
-    if (!apiEndpoint) return; // 没有API端点无法获取状态
-
-    statusOutput.className = 'status pending';
-    statusOutput.textContent = '正在获取构建状态...';
-
-    fetch(`${apiEndpoint}/build/${buildId}`)
-      .then(handleResponse)
-      .then(data => {
-        buildIdDisplay.textContent = data.build_id;
-        buildStatusDisplay.textContent = getStatusText(data.status);
-
-        if (data.created_at) {
-          createdAtDisplay.textContent = formatDate(data.created_at);
-        }
-
-        if (data.updated_at) {
-          updatedAtDisplay.textContent = formatDate(data.updated_at);
-        }
-
-        // 根据状态更新界面
-        if (data.status === 'success') {
-          statusOutput.className = 'status success';
-          statusOutput.textContent = '构建成功!';
-
-          if (data.image) {
-            imageRow.classList.remove('hidden');
-            imageUrlDisplay.textContent = data.image;
-          }
-        } else if (data.status === 'failed') {
-          statusOutput.className = 'status error';
-          statusOutput.textContent = '构建失败!';
-        } else {
-          statusOutput.className = 'status pending';
-          statusOutput.textContent = '构建进行中...';
-
-          // 每10秒自动刷新一次
-          setTimeout(() => fetchBuildStatus(buildId, apiEndpoint), 10000);
-        }
-      })
-      .catch(handleError);
-  }
-
-  // 处理API响应
-  function handleResponse(response) {
-    if (!response.ok) {
-      throw new Error(`请求失败，状态码: ${response.status}`);
-    }
-    return response.json();
-  }
-
-  // 处理错误
-  function handleError(error) {
-    statusOutput.className = 'status error';
-    statusOutput.textContent = `请求失败: ${error.message}`;
-    console.error(error);
-  }
-
   // 保存表单数据到localStorage
   function saveFormData(data) {
     if (!rememberCheckbox || !rememberCheckbox.checked) return;
@@ -300,24 +231,5 @@ document.addEventListener('DOMContentLoaded', function () {
     nonSensitiveFields.forEach(field => {
       localStorage.removeItem(`budiu_${field}`);
     });
-  }
-
-  // 辅助函数
-  function getStatusText(status) {
-    switch (status) {
-      case 'pending': return '进行中';
-      case 'success': return '成功';
-      case 'failed': return '失败';
-      default: return status;
-    }
-  }
-
-  function formatDate(dateStr) {
-    if (!dateStr) return '';
-    try {
-      return new Date(dateStr).toLocaleString('zh-CN');
-    } catch (e) {
-      return dateStr;
-    }
   }
 }); 

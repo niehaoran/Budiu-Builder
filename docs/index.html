@@ -98,14 +98,10 @@
 
             <div class="col-md-6">
               <div class="form-group mb-3">
-                <label for="image-name" class="form-label">镜像名称</label>
-                <input type="text" id="image-name" class="form-control" required>
-                <div class="form-text">不需要包含仓库地址，例如：myapp</div>
-              </div>
-
-              <div class="form-group mb-3">
-                <label for="image-tag" class="form-label">镜像标签</label>
-                <input type="text" id="image-tag" class="form-control" value="latest" required>
+                <label for="image-info" class="form-label">Docker镜像信息</label>
+                <input type="text" id="image-info" class="form-control" value="myapp:latest"
+                  placeholder="格式: 名称:标签，例如 myapp:latest" required>
+                <div class="form-text">格式为"名称:标签"，例如: myapp:latest</div>
               </div>
             </div>
           </div>
@@ -138,7 +134,7 @@
           <li><strong>填写仓库信息</strong> - 输入您的代码仓库地址和分支信息</li>
           <li><strong>选择Dockerfile来源</strong> - 使用仓库中的Dockerfile或上传自己的文件</li>
           <li><strong>提供Docker仓库信息</strong> - 输入您要推送镜像的Docker仓库凭据 (格式: 用户名:密码)</li>
-          <li><strong>设置镜像名称和标签</strong> - 为构建的Docker镜像命名</li>
+          <li><strong>设置镜像信息</strong> - 为构建的Docker镜像命名 (格式: 名称:标签)</li>
           <li><strong>提供GitHub Token</strong> - 输入GitHub个人访问令牌以实现自动构建，无需等待批准</li>
           <li><strong>触发构建</strong> - 点击"触发构建"按钮启动GitHub Actions工作流</li>
         </ol>

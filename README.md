@@ -34,8 +34,7 @@
 | `dockerfile_path` | 仓库中的Dockerfile路径 | 在`dockerfile_source=repo`时必须 |
 | `docker_registry` | Docker镜像仓库地址 | 是 |
 | `docker_auth` | Docker认证信息 (格式: 用户名:密码) | 是 |
-| `image_name` | Docker镜像名称 | 是 |
-| `image_tag` | Docker镜像标签 | 是，默认`latest` |
+| `image_info` | Docker镜像信息 (格式: 名称:标签) | 是，不含标签时默认使用`latest` |
 
 ## 自动授权构建
 

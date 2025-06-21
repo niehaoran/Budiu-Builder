@@ -43,14 +43,9 @@ on:
         description: 'Docker认证 (格式: 用户名:密码)'
         required: true
         type: string
-      image_name:
-        description: 'Docker镜像名称'
+      image_info:
+        description: 'Docker镜像信息 (格式: 名称:标签，例如 myapp:latest)'
         required: true
-        type: string
-      image_tag:
-        description: 'Docker镜像标签'
-        required: true
-        default: 'latest'
         type: string
       github_token:
         description: 'GitHub Token (用于自动授权，可选)'
@@ -79,6 +74,22 @@ jobs:
           DOCKER_PASSWORD=$(echo $DOCKER_AUTH | cut -d ':' -f 2-)
           echo "DOCKER_USERNAME=$DOCKER_USERNAME" >> $GITHUB_ENV
           echo "DOCKER_PASSWORD=$DOCKER_PASSWORD" >> $GITHUB_ENV
+          
+      # 解析镜像信息
+      - name: 解析镜像信息
+        id: image_info
+        run: |
+          IMAGE_INFO="${{ github.event.inputs.image_info }}"
+          if [[ $IMAGE_INFO == *":"* ]]; then
+            IMAGE_NAME=$(echo $IMAGE_INFO | cut -d ':' -f 1)
+            IMAGE_TAG=$(echo $IMAGE_INFO | cut -d ':' -f 2-)
+          else
+            IMAGE_NAME=$IMAGE_INFO
+            IMAGE_TAG="latest"
+          fi
+          echo "IMAGE_NAME=$IMAGE_NAME" >> $GITHUB_ENV
+          echo "IMAGE_TAG=$IMAGE_TAG" >> $GITHUB_ENV
+          echo "使用镜像名称: $IMAGE_NAME, 标签: $IMAGE_TAG"
 
       - name: 检出源代码
         uses: actions/checkout@v3
@@ -141,9 +152,9 @@ jobs:
           context: ./source_code
           file: ./Dockerfile
           push: true
-          tags: ${{ github.event.inputs.docker_registry }}/${{ github.event.inputs.image_name }}:${{ github.event.inputs.image_tag }}
+          tags: ${{ github.event.inputs.docker_registry }}/${{ env.IMAGE_NAME }}:${{ env.IMAGE_TAG }}
 
       - name: 构建结果
         run: |
           echo "Docker镜像构建完成!"
-          echo "镜像: ${{ github.event.inputs.docker_registry }}/${{ github.event.inputs.image_name }}:${{ github.event.inputs.image_tag }}" 
+          echo "镜像: ${{ github.event.inputs.docker_registry }}/${{ env.IMAGE_NAME }}:${{ env.IMAGE_TAG }}" 

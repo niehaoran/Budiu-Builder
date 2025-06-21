@@ -1,0 +1,129 @@
+name: Docker Build Workflow
+
+on:
+  workflow_dispatch:
+    inputs:
+      repo_url:
+        description: '代码仓库地址 (GitHub/Gitee等)'
+        required: true
+        type: string
+      repo_branch:
+        description: '代码仓库分支'
+        required: true
+        default: 'main'
+        type: string
+      repo_token:
+        description: '私有仓库访问令牌 (可选)'
+        required: false
+        type: string
+      dockerfile_source:
+        description: '选择Dockerfile来源'
+        required: true
+        default: 'repo'
+        type: choice
+        options:
+          - 'repo'
+          - 'upload'
+      dockerfile_path:
+        description: '仓库中的Dockerfile路径 (如果选择repo)'
+        required: false
+        default: 'Dockerfile'
+        type: string
+      docker_registry:
+        description: 'Docker镜像仓库地址'
+        required: true
+        type: string
+      docker_username:
+        description: 'Docker仓库用户名'
+        required: true
+        type: string
+      docker_password:
+        description: 'Docker仓库密码'
+        required: true
+        type: string
+      image_name:
+        description: 'Docker镜像名称'
+        required: true
+        type: string
+      image_tag:
+        description: 'Docker镜像标签'
+        required: true
+        default: 'latest'
+        type: string
+
+jobs:
+  build-and-push:
+    runs-on: ubuntu-latest
+    steps:
+      - name: 检查参数
+        run: |
+          echo "构建参数检查..."
+          echo "仓库地址: ${{ github.event.inputs.repo_url }}"
+          echo "Dockerfile来源: ${{ github.event.inputs.dockerfile_source }}"
+          echo "Docker仓库: ${{ github.event.inputs.docker_registry }}"
+
+      - name: 检出源代码
+        uses: actions/checkout@v3
+        with:
+          repository: ${{ github.repository }}
+          ref: main
+
+      - name: 创建工作目录
+        run: |
+          mkdir -p workspace
+          cd workspace
+
+      - name: 克隆目标仓库
+        run: |
+          if [ -n "${{ github.event.inputs.repo_token }}" ]; then
+            # 私有仓库，添加凭证
+            REPO_URL=$(echo "${{ github.event.inputs.repo_url }}" | sed "s/https:\/\//https:\/\/${{ github.event.inputs.repo_token }}@/g")
+            git clone --branch ${{ github.event.inputs.repo_branch }} $REPO_URL ./source_code
+          else
+            # 公开仓库
+            git clone --branch ${{ github.event.inputs.repo_branch }} ${{ github.event.inputs.repo_url }} ./source_code
+          fi
+
+      - name: 准备Dockerfile
+        run: |
+          if [ "${{ github.event.inputs.dockerfile_source }}" == "repo" ]; then
+            echo "使用仓库中的Dockerfile: ${{ github.event.inputs.dockerfile_path }}"
+            cp -f ./source_code/${{ github.event.inputs.dockerfile_path }} ./Dockerfile
+            if [ ! -f "./Dockerfile" ]; then
+              echo "错误: 在仓库中找不到指定的Dockerfile!"
+              exit 1
+            fi
+          else
+            echo "使用上传的Dockerfile"
+            echo "注意: 此示例中，上传的Dockerfile功能需要通过前端页面上传"
+            # 前端上传的Dockerfile会通过API保存，这里仅作为演示
+            if [ ! -f "./uploads/Dockerfile" ]; then
+              echo "错误: 未找到上传的Dockerfile!"
+              exit 1
+            fi
+            cp -f ./uploads/Dockerfile ./Dockerfile
+          fi
+          cat ./Dockerfile
+
+      - name: 登录到Docker仓库
+        uses: docker/login-action@v2
+        with:
+          registry: ${{ github.event.inputs.docker_registry }}
+          username: ${{ github.event.inputs.docker_username }}
+          password: ${{ github.event.inputs.docker_password }}
+
+      - name: 设置Docker Buildx
+        uses: docker/setup-buildx-action@v2
+
+      - name: 构建并推送Docker镜像
+        uses: docker/build-push-action@v4
+        with:
+          context: ./source_code
+          file: ./Dockerfile
+          push: true
+          tags: ${{ github.event.inputs.docker_registry }}/${{ github.event.inputs.image_name }}:${{ github.event.inputs.image_tag }}
+
+      - name: 构建结果
+        run: |
+          echo "Docker镜像构建完成!"
+          echo "镜像: ${{ github.event.inputs.docker_registry }}/${{ github.event.inputs.image_name }}:${{ github.event.inputs.image_tag }}" 

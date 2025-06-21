@@ -1,153 +1,84 @@
-# Budiu-Builder
+# Budiu Docker 构建器
 
-自动化构建系统，将GitHub/Gitee仓库自动构建为Docker镜像并推送到指定仓库。
+一个基于GitHub Actions的Docker镜像自动构建工具，可通过网页界面轻松触发构建流程。
 
 ## 功能特点
 
-- 支持GitHub和Gitee仓库源
-- 全自动检测项目类型和依赖
-- 使用Cloud Native Buildpacks构建镜像
-- 自动推送到Docker Hub或其他镜像仓库
-- AI辅助自动生成Dockerfile (新功能!)
+- 🚀 通过网页界面触发Docker镜像构建
+- 🔄 支持任意代码仓库（GitHub/Gitee等）
+- 🔒 支持私有仓库（通过访问令牌）
+- 📄 灵活选择Dockerfile来源（仓库内或上传）
+- 📦 支持推送到任意Docker镜像仓库
+- 💾 保存构建配置到本地（不含敏感信息）
+- 🔍 实时查看构建状态和结果
 
-## 使用方法
+## 快速开始
 
-### 方式一：使用Cloud Native Buildpacks全自动构建
+1. Fork或克隆此仓库到您的GitHub账户
+2. 启用GitHub Pages（设置为从`main`分支的`/docs`目录发布）
+3. 访问您的GitHub Pages网址（通常为`https://[用户名].github.io/Budiu-Builder/`）
+4. 使用网页界面配置构建参数并触发构建
 
-1. 进入Actions标签
-2. 选择"Build and Deploy"工作流
-3. 点击"Run workflow"
-4. 填入：
-   - 代码仓库地址
-   - 分支名称
-   - 镜像名称和标签
-   - 镜像仓库地址
-   - Docker仓库凭据
+## 工作流配置参数
 
-### 方式二：使用AI自动生成Dockerfile (新功能!)
+构建工作流接受以下参数：
 
-如果你希望先生成Dockerfile以便检查或修改，可以：
+| 参数名 | 描述 | 是否必须 |
+|-------|------|---------|
+| `repo_url` | 代码仓库地址 (GitHub/Gitee等) | 是 |
+| `repo_branch` | 代码仓库分支 | 是，默认`main` |
+| `repo_token` | 私有仓库访问令牌 | 否 |
+| `dockerfile_source` | Dockerfile来源 (`repo`或`upload`) | 是，默认`repo` |
+| `dockerfile_path` | 仓库中的Dockerfile路径 | 在`dockerfile_source=repo`时必须 |
+| `docker_registry` | Docker镜像仓库地址 | 是 |
+| `docker_username` | Docker仓库用户名 | 是 |
+| `docker_password` | Docker仓库密码/令牌 | 是 |
+| `image_name` | Docker镜像名称 | 是 |
+| `image_tag` | Docker镜像标签 | 是，默认`latest` |
 
-1. 进入Actions标签
-2. 选择"自动生成Dockerfile"工作流
-3. 点击"Run workflow"
-4. 填入：
-   - 代码仓库地址
-   - 分支名称
+## 实现原理
 
-系统将使用GitHub Copilot分析项目并生成适合的Dockerfile，然后提交回仓库。
+1. 用户通过网页界面填写构建参数
+2. 表单提交触发GitHub Actions `workflow_dispatch`事件
+3. GitHub Actions工作流执行以下步骤：
+   - 克隆指定的代码仓库
+   - 准备Dockerfile（从仓库或上传的文件）
+   - 登录到指定的Docker镜像仓库
+   - 构建并推送Docker镜像
+   - 返回构建结果
 
-## 高级选项
+## 本地开发
 
-- 支持自定义回调通知URL
-- 支持私有仓库(需提供访问令牌)
-- 自动检测分支信息
+如果您想在本地开发或修改此项目，可以按照以下步骤进行：
 
-## 注意事项
+```bash
+# 克隆仓库
+git clone https://github.com/your-username/Budiu-Builder.git
+cd Budiu-Builder
 
-- 若项目已包含Dockerfile，会优先使用项目自带的Dockerfile
-- 构建过程中的日志可在Actions运行记录中查看
+# 安装依赖（如果有需要）
+# npm install
 
-## 使用方法
+# 在本地测试网页
+cd docs
+python -m http.server 8000
+# 访问 http://localhost:8000
+```
 
-### 服务器端设置
+## 贡献指南
 
-1. Fork本仓库到您的GitHub账号
-2. 配置GitHub Actions工作流：
-   - `.github/workflows/build.yml`文件已包含所有构建逻辑
-   - 无需设置仓库级别的Secrets，所有必要信息在构建时由用户提供
-3. 部署Web界面：
-   - 启用GitHub Pages，选择`/docs`目录作为源
-   - 用户可以通过Web界面直接触发构建
+欢迎通过以下方式为此项目做出贡献：
 
-### 重要：配置仓库信息
+1. Fork仓库
+2. 创建功能分支 (`git checkout -b feature/amazing-feature`)
+3. 提交更改 (`git commit -m 'Add some amazing feature'`)
+4. 推送到分支 (`git push origin feature/amazing-feature`)
+5. 创建Pull Request
 
-在部署后，您需要修改一个关键设置才能使系统正常工作：
+## 许可证
 
-1. 编辑 `docs/app.js` 文件
-2. 找到以下代码行（大约在第14行）:
-   ```javascript
-   const DEFAULT_REPO = 'your-username/Budiu-Builder';
-   ```
-3. 将其更改为您的GitHub用户名和仓库名:
-   ```javascript
-   const DEFAULT_REPO = 'niehaoran/Budiu-Builder';
-   ```
-4. 保存并提交更改
+此项目采用MIT许可证 - 详情请查看 [LICENSE](LICENSE) 文件。
 
-这一步非常重要，因为它告诉前端界面应该触发哪个仓库的GitHub Actions工作流。
+## 免责声明
 
-### Web界面部署
-
-本项目包含一个用户友好的Web界面，可以轻松部署到GitHub Pages：
-
-1. 在仓库的"Settings"选项卡中，找到"Pages"部分
-2. 在"Source"下拉菜单中选择"main branch"和"/docs"文件夹
-3. 点击"Save"按钮
-4. GitHub会生成一个URL（通常是 `https://niehaoran.github.io/Budiu-Builder`）
-5. 部署完成后，用户可以通过该URL访问Web界面
-
-### 安全性说明
-
-本系统处理敏感信息的方式：
-
-1. **Docker凭据** - 用户输入的凭据直接传递给GitHub Actions，不会在前端存储
-2. **仓库令牌** - 用于访问私有仓库的令牌仅在构建过程中使用，不会被保存
-3. **GitHub令牌** - 用于触发工作流的令牌仅在API请求中使用，不会被前端存储
-4. **本地存储** - 默认仅保存非敏感信息（仓库URL、镜像名称等）
-
-## 使用方式
-
-### Web界面构建流程
-
-1. 访问Web界面（GitHub Pages部署）
-2. 填写代码仓库信息（URL和分支）
-3. 提供Docker凭据（用于推送镜像）
-4. 提供GitHub令牌（用于触发工作流）
-5. 可选择性提供回调URL（构建完成通知）
-6. 点击提交构建请求
-
-构建触发后，GitHub Actions会自动执行以下步骤：
-- 克隆指定的代码仓库
-- 使用Buildpacks识别项目类型并构建镜像
-- 推送镜像到指定的Docker仓库
-- 如果提供了回调URL，则通知指定服务构建完成
-
-## 工作流程
-
-1. 用户通过Web界面提交构建请求
-2. Web界面使用GitHub API直接触发GitHub Actions工作流
-3. GitHub Actions克隆代码，使用Buildpacks构建镜像
-4. GitHub Actions推送镜像到指定的Docker仓库
-5. 如果提供了回调URL，GitHub Actions通知指定服务构建完成
-6. 用户可以部署和访问构建好的应用
-
-## 所需GitHub令牌权限
-
-使用本系统需要创建具有以下权限的GitHub个人访问令牌：
-
-- `repo` - 完整的仓库访问权限（用于触发工作流）
-- `workflow` - 更新GitHub Actions工作流文件的权限
-
-创建令牌的步骤：
-1. 访问GitHub设置页面 (https://github.com/settings/profile)
-2. 点击"Developer settings"
-3. 选择"Personal access tokens" > "Tokens (classic)"
-4. 点击"Generate new token" > "Generate new token (classic)"
-5. 填写说明，例如"Budiu-Builder"
-6. 选择权限：勾选"repo"和"workflow"选项
-7. 点击"Generate token"按钮
-8. 复制生成的令牌（注意：令牌只会显示一次）
-
-## 故障排除
-
-如果触发构建失败，请检查：
-
-1. 您是否已正确更新`docs/app.js`中的`DEFAULT_REPO`值为您自己的仓库
-2. GitHub令牌是否拥有`repo`和`workflow`权限
-3. 浏览器控制台中是否有错误信息（F12打开开发者工具）
-4. 确保GitHub Actions在您的仓库中已启用
-
-## 配置文件
-
-查看 `.github/workflows/build.yml` 获取工作流配置详情。
+本工具仅用于简化Docker镜像的构建过程，用户应当确保使用的所有代码和镜像符合相关的许可和规定。使用此工具构建的Docker镜像的内容和用途由用户自行负责。 

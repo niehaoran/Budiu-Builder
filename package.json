@@ -1,24 +1,27 @@
 {
   "name": "budiu-builder",
   "version": "1.0.0",
-  "description": "Budiu-Builder是一个基于GitHub Actions的自动构建系统",
-  "main": "scripts/backend-example.js",
+  "description": "一个基于GitHub Actions的Docker镜像自动构建工具",
+  "main": "index.js",
   "scripts": {
-    "start": "node scripts/backend-example.js",
+    "start": "cd docs && python -m http.server 8000",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
   "keywords": [
     "docker",
-    "buildpacks",
     "github-actions",
-    "cicd",
-    "container"
+    "workflow",
+    "ci-cd",
+    "automation"
   ],
-  "author": "",
+  "author": "Your Name",
   "license": "MIT",
-  "dependencies": {
-    "express": "^4.18.2",
-    "axios": "^1.4.0",
-    "body-parser": "^1.20.2"
-  }
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/your-username/Budiu-Builder.git"
+  },
+  "bugs": {
+    "url": "https://github.com/your-username/Budiu-Builder/issues"
+  },
+  "homepage": "https://github.com/your-username/Budiu-Builder#readme"
 }

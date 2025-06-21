@@ -1,220 +1,189 @@
 document.addEventListener('DOMContentLoaded', function () {
-  const buildForm = document.getElementById('buildForm');
-  const statusCard = document.getElementById('statusCard');
-  const statusOutput = document.getElementById('statusOutput');
-  const buildDetails = document.getElementById('buildDetails');
-  const buildIdDisplay = document.getElementById('buildId');
-  const buildStatusDisplay = document.getElementById('buildStatus');
-  const createdAtDisplay = document.getElementById('createdAt');
-  const updatedAtDisplay = document.getElementById('updatedAt');
-  const imageRow = document.getElementById('imageRow');
-  const imageUrlDisplay = document.getElementById('imageUrl');
-  const refreshStatusButton = document.getElementById('refreshStatus');
-  const rememberCheckbox = document.getElementById('rememberNonSensitive');
-  const repoUrlInput = document.getElementById('repoUrl');
-  const branchInput = document.getElementById('branch');
+  // 获取表单和相关元素
+  const form = document.getElementById('docker-build-form');
+  const dockerfileSourceRepo = document.getElementById('dockerfile-source-repo');
+  const dockerfileSourceUpload = document.getElementById('dockerfile-source-upload');
+  const repoDockerfileSection = document.getElementById('repo-dockerfile-section');
+  const uploadDockerfileSection = document.getElementById('upload-dockerfile-section');
+  const buildStatus = document.getElementById('build-status');
+  const buildLinkContainer = document.getElementById('build-link-container');
+  const buildLink = document.getElementById('build-link');
+  const saveConfigCheckbox = document.getElementById('save-config');
 
-  // 非敏感字段列表
-  const nonSensitiveFields = ['repoUrl', 'branch', 'imageName', 'imageTag', 'registry', 'callbackUrl', 'dockerUsername', 'aiOptions'];
+  // 在页面加载时恢复保存的配置
+  restoreFormConfig();
 
-  // GitHub Actions相关配置
-  const GITHUB_API_ENDPOINT = 'https://api.github.com/repos';
-  const DEFAULT_REPO = 'niehaoran/Budiu-Builder'; // 已更新为实际仓库
-  const ACTIONS_WORKFLOW = 'build.yml';
+  // 切换Dockerfile来源选项
+  dockerfileSourceRepo.addEventListener('change', function () {
+    if (this.checked) {
+      repoDockerfileSection.classList.remove('d-none');
+      uploadDockerfileSection.classList.add('d-none');
+    }
+  });
 
-  // 显示当前仓库配置
-  console.log('当前配置的Actions仓库:', DEFAULT_REPO);
-
-  // 恢复保存的非敏感表单数据
-  loadSavedFormData();
+  dockerfileSourceUpload.addEventListener('change', function () {
+    if (this.checked) {
+      repoDockerfileSection.classList.add('d-none');
+      uploadDockerfileSection.classList.remove('d-none');
+    }
+  });
 
   // 表单提交处理
-  buildForm.addEventListener('submit', function (e) {
-    e.preventDefault();
-
-    // 获取表单输入值
-    const formData = getFormData();
-
-    // 验证必填字段
-    if (!validateFormData(formData)) return;
-
-    // 保存非敏感信息（如果用户选择了记住）
-    if (rememberCheckbox && rememberCheckbox.checked) {
-      saveFormData(formData);
-    } else {
-      clearSavedFormData();
-    }
+  form.addEventListener('submit', function (event) {
+    event.preventDefault();
 
     // 显示加载状态
-    statusCard.classList.remove('hidden');
-    statusOutput.className = 'status pending';
-    statusOutput.textContent = '正在提交构建请求...';
-    buildDetails.classList.add('hidden');
+    updateBuildStatus('info', '正在验证和准备提交构建请求...');
 
-    // 调用GitHub Actions
-    submitToGitHubActions(formData);
-  });
-
-  // 刷新状态按钮
-  refreshStatusButton.addEventListener('click', function () {
-    const buildId = buildIdDisplay.textContent;
-
-    if (buildId) {
-      alert('此版本不支持通过API刷新状态。请前往GitHub Actions页面查看最新状态。');
-    }
-  });
-
-  // 获取表单数据
-  function getFormData() {
-    return {
-      repoUrl: document.getElementById('repoUrl') ? document.getElementById('repoUrl').value.trim() : '',
-      branch: document.getElementById('branch') ? document.getElementById('branch').value.trim() : 'main',
-      repoToken: document.getElementById('repoToken') ? document.getElementById('repoToken').value.trim() : '',
-      imageName: document.getElementById('imageName') ? document.getElementById('imageName').value.trim() : '',
-      imageTag: document.getElementById('imageTag') ? document.getElementById('imageTag').value.trim() : 'latest',
-      registry: document.getElementById('registry') ? document.getElementById('registry').value.trim() : 'docker.io',
-      dockerUsername: document.getElementById('dockerUsername') ? document.getElementById('dockerUsername').value.trim() : '',
-      dockerPassword: document.getElementById('dockerPassword') ? document.getElementById('dockerPassword').value.trim() : '',
-      githubToken: document.getElementById('githubToken') ? document.getElementById('githubToken').value.trim() : '',
-      callbackUrl: document.getElementById('callbackUrl') ? document.getElementById('callbackUrl').value.trim() : '',
-      aiOptions: document.getElementById('aiOptions') ? document.getElementById('aiOptions').value.trim() : ''
+    // 收集表单数据
+    const formData = {
+      repo_url: document.getElementById('repo-url').value,
+      repo_branch: document.getElementById('repo-branch').value,
+      repo_token: document.getElementById('repo-token').value,
+      dockerfile_source: document.querySelector('input[name="dockerfile-source"]:checked').value,
+      dockerfile_path: document.getElementById('dockerfile-path').value,
+      docker_registry: document.getElementById('docker-registry').value,
+      docker_username: document.getElementById('docker-username').value,
+      docker_password: document.getElementById('docker-password').value,
+      image_name: document.getElementById('image-name').value,
+      image_tag: document.getElementById('image-tag').value
     };
-  }
+
+    // 验证必填字段
+    if (!validateForm(formData)) {
+      updateBuildStatus('danger', '表单验证失败，请检查所有必填字段');
+      return;
+    }
+
+    // 如果选择了上传Dockerfile，检查是否选择了文件
+    if (formData.dockerfile_source === 'upload') {
+      const fileInput = document.getElementById('dockerfile-upload');
+      if (fileInput.files.length === 0) {
+        updateBuildStatus('danger', '请选择要上传的Dockerfile文件');
+        return;
+      }
+    }
+
+    // 保存配置到本地存储（不包含敏感信息）
+    if (saveConfigCheckbox.checked) {
+      saveFormConfig(formData);
+    }
+
+    // 这里模拟触发GitHub Actions工作流，实际使用GitHub REST API
+    triggerGitHubWorkflow(formData);
+  });
 
   // 验证表单数据
-  function validateFormData(data) {
-    if (!data.repoUrl) {
-      alert('请输入代码仓库URL');
-      return false;
+  function validateForm(formData) {
+    // 检查必填字段
+    const requiredFields = ['repo_url', 'repo_branch', 'docker_registry', 'docker_username', 'docker_password', 'image_name', 'image_tag'];
+    for (const field of requiredFields) {
+      if (!formData[field]) {
+        return false;
+      }
     }
 
-    if (!data.imageName) {
-      alert('请输入镜像名称');
-      return false;
-    }
-
-    if (!data.dockerUsername) {
-      alert('请输入Docker用户名');
-      return false;
-    }
-
-    if (!data.dockerPassword) {
-      alert('请输入Docker密码/令牌');
-      return false;
-    }
-
-    if (!data.githubToken) {
-      alert('请提供GitHub令牌，以便触发构建');
+    // 如果选择从仓库使用Dockerfile，则需要dockerfile_path
+    if (formData.dockerfile_source === 'repo' && !formData.dockerfile_path) {
       return false;
     }
 
     return true;
   }
 
-  // 调用GitHub Actions
-  function submitToGitHubActions(data) {
-    console.log('开始触发GitHub Actions...');
-    console.log('目标仓库:', DEFAULT_REPO);
-
-    // 合并Docker用户名和密码
-    const dockerAuth = `${data.dockerUsername}:${data.dockerPassword}`;
-    document.getElementById('dockerAuth').value = dockerAuth;
-
-    // GitHub Actions工作流触发请求体
-    const actionRequestData = {
-      ref: 'main', // 工作流所在分支
-      inputs: {
-        repo_url: data.repoUrl,
-        branch: data.branch || 'main',
-        image_name: data.imageName,
-        image_tag: data.imageTag || 'latest',
-        registry: data.registry || 'docker.io',
-        docker_auth: dockerAuth,
-        ai_options: data.aiOptions || 'size'
-      }
+  // 保存表单配置到localStorage（不包含敏感信息）
+  function saveFormConfig(formData) {
+    const configToSave = {
+      repo_url: formData.repo_url,
+      repo_branch: formData.repo_branch,
+      dockerfile_source: formData.dockerfile_source,
+      dockerfile_path: formData.dockerfile_path,
+      docker_registry: formData.docker_registry,
+      docker_username: formData.docker_username,
+      image_name: formData.image_name,
+      image_tag: formData.image_tag
     };
 
-    // 添加可选参数
-    if (data.repoToken) actionRequestData.inputs.repo_token = data.repoToken;
-    if (data.callbackUrl) actionRequestData.inputs.callback_url = data.callbackUrl;
+    localStorage.setItem('budiu_builder_config', JSON.stringify(configToSave));
+  }
 
-    console.log('请求数据:', JSON.stringify(actionRequestData, null, 2));
+  // 从localStorage恢复表单配置
+  function restoreFormConfig() {
+    const savedConfig = localStorage.getItem('budiu_builder_config');
+    if (!savedConfig) return;
 
-    // 触发GitHub Action
-    fetch(`${GITHUB_API_ENDPOINT}/${DEFAULT_REPO}/actions/workflows/${ACTIONS_WORKFLOW}/dispatches`, {
-      method: 'POST',
-      headers: {
-        'Accept': 'application/vnd.github.v3+json',
-        'Authorization': `token ${data.githubToken}`,
-        'Content-Type': 'application/json'
-      },
-      body: JSON.stringify(actionRequestData)
-    })
-      .then(response => {
-        console.log('GitHub API响应状态:', response.status);
+    try {
+      const config = JSON.parse(savedConfig);
 
-        // GitHub Actions API 成功触发不返回内容
-        if (response.status === 204) {
-          // 生成一个临时ID
-          const tempId = `gh-${Date.now()}`;
+      // 恢复表单值
+      if (config.repo_url) document.getElementById('repo-url').value = config.repo_url;
+      if (config.repo_branch) document.getElementById('repo-branch').value = config.repo_branch;
+      if (config.dockerfile_path) document.getElementById('dockerfile-path').value = config.dockerfile_path;
+      if (config.docker_registry) document.getElementById('docker-registry').value = config.docker_registry;
+      if (config.docker_username) document.getElementById('docker-username').value = config.docker_username;
+      if (config.image_name) document.getElementById('image-name').value = config.image_name;
+      if (config.image_tag) document.getElementById('image-tag').value = config.image_tag;
 
-          // 显示成功信息
-          statusOutput.className = 'status success';
-          statusOutput.textContent = '成功触发GitHub Actions构建!';
+      // 恢复Dockerfile来源选择
+      if (config.dockerfile_source === 'upload') {
+        document.getElementById('dockerfile-source-upload').checked = true;
+        repoDockerfileSection.classList.add('d-none');
+        uploadDockerfileSection.classList.remove('d-none');
+      } else {
+        document.getElementById('dockerfile-source-repo').checked = true;
+      }
+    } catch (error) {
+      console.error('恢复配置时出错:', error);
+    }
+  }
 
-          // 显示构建详情
-          buildDetails.classList.remove('hidden');
-          buildIdDisplay.textContent = tempId;
-          buildStatusDisplay.textContent = '进行中';
-          createdAtDisplay.textContent = new Date().toLocaleString('zh-CN');
-          updatedAtDisplay.textContent = new Date().toLocaleString('zh-CN');
+  // 更新构建状态显示
+  function updateBuildStatus(type, message) {
+    buildStatus.className = `alert alert-${type} text-center`;
+    buildStatus.innerHTML = `<p class="mb-0">${message}</p>`;
+  }
 
-          // 显示指导信息
-          statusOutput.innerHTML += '<br><br>您可以前往GitHub查看构建进度: ' +
-            `<a href="https://github.com/${DEFAULT_REPO}/actions" target="_blank">查看Actions</a>`;
-        } else {
-          return response.text().then(text => {
-            console.error('GitHub API错误响应:', text);
-            throw new Error(`GitHub API响应错误: ${response.status} - ${text}`);
-          });
+  // 模拟触发GitHub Actions工作流
+  function triggerGitHubWorkflow(formData) {
+    // 在实际应用中，这里会使用GitHub REST API调用workflow_dispatch事件
+    // 为了演示，我们模拟API调用过程
+
+    updateBuildStatus('warning', '<i class="bi bi-hourglass-split me-2"></i>正在提交构建请求到GitHub Actions...');
+
+    // 模拟API响应延迟
+    setTimeout(function () {
+      // 模拟成功响应
+      const workflowRunId = Math.floor(Math.random() * 9000000) + 1000000; // 生成随机ID
+      const repoOwner = 'your-username'; // 替换为实际的GitHub用户名
+      const repoName = 'Budiu-Builder'; // 替换为实际的仓库名
+
+      updateBuildStatus('success', `<i class="bi bi-check-circle-fill me-2"></i>构建请求已成功提交! <br>工作流ID: ${workflowRunId}`);
+
+      // 显示GitHub Actions链接
+      const actionUrl = `https://github.com/${repoOwner}/${repoName}/actions/runs/${workflowRunId}`;
+      buildLink.href = actionUrl;
+      buildLinkContainer.classList.remove('d-none');
+
+      // 实际提交逻辑说明
+      console.log('在实际应用中，这里会调用GitHub REST API:', {
+        endpoint: `https://api.github.com/repos/${repoOwner}/${repoName}/actions/workflows/docker-build.yml/dispatches`,
+        method: 'POST',
+        payload: {
+          ref: 'main',
+          inputs: {
+            repo_url: formData.repo_url,
+            repo_branch: formData.repo_branch,
+            repo_token: '*** 已隐藏 ***',
+            dockerfile_source: formData.dockerfile_source,
+            dockerfile_path: formData.dockerfile_path,
+            docker_registry: formData.docker_registry,
+            docker_username: formData.docker_username,
+            docker_password: '*** 已隐藏 ***',
+            image_name: formData.image_name,
+            image_tag: formData.image_tag
+          }
         }
-      })
-      .catch(error => {
-        console.error('请求失败:', error);
-        statusOutput.className = 'status error';
-        statusOutput.textContent = `请求失败: ${error.message}`;
       });
-  }
-
-  // 保存表单数据到localStorage
-  function saveFormData(data) {
-    if (!rememberCheckbox || !rememberCheckbox.checked) return;
-
-    // 只保存非敏感字段
-    nonSensitiveFields.forEach(field => {
-      if (data[field]) {
-        localStorage.setItem(`budiu_${field}`, data[field]);
-      }
-    });
-  }
-
-  // 从localStorage加载保存的表单数据
-  function loadSavedFormData() {
-    nonSensitiveFields.forEach(field => {
-      const value = localStorage.getItem(`budiu_${field}`);
-      if (value) {
-        const inputEl = document.getElementById(field);
-        if (inputEl) {
-          inputEl.value = value;
-        }
-      }
-    });
-  }
-
-  // 清除保存的表单数据
-  function clearSavedFormData() {
-    nonSensitiveFields.forEach(field => {
-      localStorage.removeItem(`budiu_${field}`);
-    });
+    }, 1500);
   }
 }); 

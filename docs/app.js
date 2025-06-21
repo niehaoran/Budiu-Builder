@@ -10,6 +10,11 @@ document.addEventListener('DOMContentLoaded', function () {
   const buildLink = document.getElementById('build-link');
   const saveConfigCheckbox = document.getElementById('save-config');
 
+  // GitHub配置
+  const GITHUB_OWNER = 'niehaoran'; // 替换为实际的GitHub用户名
+  const GITHUB_REPO = 'Budiu-Builder'; // 替换为实际的仓库名
+  const GITHUB_WORKFLOW_FILE = 'docker-build.yml'; // 工作流文件名
+
   // 在页面加载时恢复保存的配置
   restoreFormConfig();
 
@@ -63,6 +68,10 @@ document.addEventListener('DOMContentLoaded', function () {
         updateBuildStatus('danger', '请选择要上传的Dockerfile文件');
         return;
       }
+
+      // 这里处理Dockerfile上传的逻辑
+      // 实际应用中需要先上传Dockerfile到服务器，然后再触发工作流
+      // 为了简化示例，这里假设已经处理了上传
     }
 
     // 保存配置到本地存储（不包含敏感信息）
@@ -73,7 +82,7 @@ document.addEventListener('DOMContentLoaded', function () {
     // 转换为GitHub Actions工作流需要的JSON格式参数
     const workflowInputs = convertToWorkflowInputs(formData);
 
-    // 触发GitHub Actions工作流
+    // 实际触发GitHub Actions工作流
     triggerGitHubWorkflow(formData, workflowInputs);
   });
 
@@ -183,43 +192,51 @@ document.addEventListener('DOMContentLoaded', function () {
     buildStatus.innerHTML = `<p class="mb-0">${message}</p>`;
   }
 
-  // 模拟触发GitHub Actions工作流
+  // 实际触发GitHub Actions工作流
   function triggerGitHubWorkflow(formData, workflowInputs) {
-    // 在实际应用中，这里会使用GitHub REST API调用workflow_dispatch事件
-    // 为了演示，我们模拟API调用过程
+    // 检查是否提供了GitHub Token
+    if (!formData.github_token) {
+      updateBuildStatus('warning', '<i class="bi bi-exclamation-triangle-fill me-2"></i>未提供GitHub Token，无法自动触发工作流。请提供GitHub Token后重试。');
+      return;
+    }
 
     updateBuildStatus('warning', '<i class="bi bi-hourglass-split me-2"></i>正在提交构建请求到GitHub Actions...');
 
-    // 添加关于GitHub Token的状态消息
-    if (formData.github_token) {
-      updateBuildStatus('warning', '<i class="bi bi-hourglass-split me-2"></i>正在提交构建请求到GitHub Actions... (已提供GitHub Token，将自动授权构建)');
-    } else {
-      updateBuildStatus('warning', '<i class="bi bi-hourglass-split me-2"></i>正在提交构建请求到GitHub Actions... (未提供GitHub Token，可能需要手动批准构建)');
-    }
+    // 构建API请求参数
+    const apiUrl = `https://api.github.com/repos/${GITHUB_OWNER}/${GITHUB_REPO}/actions/workflows/${GITHUB_WORKFLOW_FILE}/dispatches`;
 
-    // 模拟API响应延迟
-    setTimeout(function () {
-      // 模拟成功响应
-      const workflowRunId = Math.floor(Math.random() * 9000000) + 1000000; // 生成随机ID
-      const repoOwner = 'your-username'; // 替换为实际的GitHub用户名
-      const repoName = 'Budiu-Builder'; // 替换为实际的仓库名
+    // 发送请求到GitHub API
+    fetch(apiUrl, {
+      method: 'POST',
+      headers: {
+        'Accept': 'application/vnd.github.v3+json',
+        'Content-Type': 'application/json',
+        'Authorization': `token ${formData.github_token}`
+      },
+      body: JSON.stringify({
+        ref: 'main',  // 指定要在其上运行工作流的分支
+        inputs: workflowInputs
+      })
+    })
+      .then(response => {
+        if (response.ok || response.status === 204) {
+          // GitHub API在成功时返回204 No Content
+          // 由于GitHub API不返回工作流运行ID，我们需要重定向到GitHub Actions页面
+          const actionsUrl = `https://github.com/${GITHUB_OWNER}/${GITHUB_REPO}/actions`;
 
-      updateBuildStatus('success', `<i class="bi bi-check-circle-fill me-2"></i>构建请求已成功提交! <br>工作流ID: ${workflowRunId}`);
+          updateBuildStatus('success', `<i class="bi bi-check-circle-fill me-2"></i>构建请求已成功提交! <br>请查看GitHub Actions页面获取详情。`);
 
-      // 显示GitHub Actions链接
-      const actionUrl = `https://github.com/${repoOwner}/${repoName}/actions/runs/${workflowRunId}`;
-      buildLink.href = actionUrl;
-      buildLinkContainer.classList.remove('d-none');
-
-      // 实际提交逻辑说明
-      console.log('在实际应用中，这里会调用GitHub REST API:', {
-        endpoint: `https://api.github.com/repos/${repoOwner}/${repoName}/actions/workflows/docker-build.yml/dispatches`,
-        method: 'POST',
-        payload: {
-          ref: 'main',
-          inputs: workflowInputs
+          // 显示GitHub Actions链接
+          buildLink.href = actionsUrl;
+          buildLink.textContent = '查看GitHub Actions构建详情';
+          buildLinkContainer.classList.remove('d-none');
+        } else {
+          throw new Error(`API请求失败: ${response.status} ${response.statusText}`);
         }
+      })
+      .catch(error => {
+        console.error('触发工作流时出错:', error);
+        updateBuildStatus('danger', `<i class="bi bi-x-circle-fill me-2"></i>触发工作流失败: ${error.message}`);
       });
-    }, 1500);
   }
 }); 

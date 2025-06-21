@@ -115,6 +115,39 @@ jobs:
           fi
           cat ./Dockerfile
 
+      - name: 预处理Dockerfile
+        run: |
+          # 检查是否需要创建特定目录
+          if grep -q "chmod.*-R.*777.*\/var\/www\/html\/install" ./Dockerfile || grep -q "chmod.*-R.*777.*\/var\/www\/html\/" ./Dockerfile; then
+            echo "检测到需要预创建目录的命令，修改Dockerfile以确保目录存在"
+            
+            # 创建临时Dockerfile
+            cp ./Dockerfile ./Dockerfile.orig
+            
+            # 查找相关目录设置
+            DIRS_TO_CREATE=""
+            if grep -q "\/var\/www\/html\/install" ./Dockerfile; then
+              DIRS_TO_CREATE="$DIRS_TO_CREATE /var/www/html/install"
+            fi
+            if grep -q "\/var\/www\/html\/file" ./Dockerfile; then
+              DIRS_TO_CREATE="$DIRS_TO_CREATE /var/www/html/file"
+            fi
+            if grep -q "\/var\/www\/html\/uploads" ./Dockerfile; then
+              DIRS_TO_CREATE="$DIRS_TO_CREATE /var/www/html/uploads"
+            fi
+            
+            # 添加创建目录命令到Dockerfile
+            if [ -n "$DIRS_TO_CREATE" ]; then
+              echo "将创建以下目录: $DIRS_TO_CREATE"
+              # 使用sed替换chown命令，添加mkdir命令
+              sed -i "s|chown -R www-data:www-data /var/www/html|mkdir -p $DIRS_TO_CREATE \&\& chown -R www-data:www-data /var/www/html|g" ./Dockerfile
+            fi
+            
+            # 显示修改后的Dockerfile
+            echo "修改后的Dockerfile:"
+            cat ./Dockerfile
+          fi
+
       - name: 设置Docker Buildx
         id: buildx
         uses: docker/setup-buildx-action@v2

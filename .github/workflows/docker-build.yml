@@ -39,13 +39,22 @@ on:
         description: 'Docker镜像仓库地址'
         required: true
         type: string
-      docker_auth:
-        description: 'Docker认证 (格式: 用户名:密码)'
+      docker_username:
+        description: 'Docker仓库用户名'
         required: true
         type: string
-      image_info:
-        description: 'Docker镜像信息 (格式: 名称:标签，例如 myapp:latest)'
+      docker_password:
+        description: 'Docker仓库密码'
         required: true
+        type: string
+      image_name:
+        description: 'Docker镜像名称'
+        required: true
+        type: string
+      image_tag:
+        description: 'Docker镜像标签'
+        required: true
+        default: 'latest'
         type: string
       github_token:
         description: 'GitHub Token (用于自动授权，可选)'
@@ -64,32 +73,6 @@ jobs:
           echo "仓库地址: ${{ github.event.inputs.repo_url }}"
           echo "Dockerfile来源: ${{ github.event.inputs.dockerfile_source }}"
           echo "Docker仓库: ${{ github.event.inputs.docker_registry }}"
-          
-      # 解析Docker认证信息
-      - name: 解析Docker认证信息
-        id: docker_auth
-        run: |
-          DOCKER_AUTH="${{ github.event.inputs.docker_auth }}"
-          DOCKER_USERNAME=$(echo $DOCKER_AUTH | cut -d ':' -f 1)
-          DOCKER_PASSWORD=$(echo $DOCKER_AUTH | cut -d ':' -f 2-)
-          echo "DOCKER_USERNAME=$DOCKER_USERNAME" >> $GITHUB_ENV
-          echo "DOCKER_PASSWORD=$DOCKER_PASSWORD" >> $GITHUB_ENV
-          
-      # 解析镜像信息
-      - name: 解析镜像信息
-        id: image_info
-        run: |
-          IMAGE_INFO="${{ github.event.inputs.image_info }}"
-          if [[ $IMAGE_INFO == *":"* ]]; then
-            IMAGE_NAME=$(echo $IMAGE_INFO | cut -d ':' -f 1)
-            IMAGE_TAG=$(echo $IMAGE_INFO | cut -d ':' -f 2-)
-          else
-            IMAGE_NAME=$IMAGE_INFO
-            IMAGE_TAG="latest"
-          fi
-          echo "IMAGE_NAME=$IMAGE_NAME" >> $GITHUB_ENV
-          echo "IMAGE_TAG=$IMAGE_TAG" >> $GITHUB_ENV
-          echo "使用镜像名称: $IMAGE_NAME, 标签: $IMAGE_TAG"
 
       - name: 检出源代码
         uses: actions/checkout@v3
@@ -140,8 +123,8 @@ jobs:
         uses: docker/login-action@v2
         with:
           registry: ${{ github.event.inputs.docker_registry }}
-          username: ${{ env.DOCKER_USERNAME }}
-          password: ${{ env.DOCKER_PASSWORD }}
+          username: ${{ github.event.inputs.docker_username }}
+          password: ${{ github.event.inputs.docker_password }}
 
       - name: 设置Docker Buildx
         uses: docker/setup-buildx-action@v2
@@ -152,9 +135,9 @@ jobs:
           context: ./source_code
           file: ./Dockerfile
           push: true
-          tags: ${{ github.event.inputs.docker_registry }}/${{ env.IMAGE_NAME }}:${{ env.IMAGE_TAG }}
+          tags: ${{ github.event.inputs.docker_registry }}/${{ github.event.inputs.image_name }}:${{ github.event.inputs.image_tag }}
 
       - name: 构建结果
         run: |
           echo "Docker镜像构建完成!"
-          echo "镜像: ${{ github.event.inputs.docker_registry }}/${{ env.IMAGE_NAME }}:${{ env.IMAGE_TAG }}" 
+          echo "镜像: ${{ github.event.inputs.docker_registry }}/${{ github.event.inputs.image_name }}:${{ github.event.inputs.image_tag }}" 

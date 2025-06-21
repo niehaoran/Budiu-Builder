@@ -9,6 +9,7 @@ document.addEventListener('DOMContentLoaded', function () {
   const buildLinkContainer = document.getElementById('build-link-container');
   const buildLink = document.getElementById('build-link');
   const saveConfigCheckbox = document.getElementById('save-config');
+  const platformsSelect = document.getElementById('platforms-select');
 
   // GitHub配置
   const GITHUB_OWNER = 'niehaoran'; // 替换为实际的GitHub用户名
@@ -53,8 +54,7 @@ document.addEventListener('DOMContentLoaded', function () {
       docker_password: document.getElementById('docker-password').value,
       image_name: document.getElementById('image-name').value,
       image_tag: document.getElementById('image-tag').value,
-      platforms: document.getElementById('platforms').value,
-      build_args: document.getElementById('build-args').value
+      platforms: getSelectedPlatforms()
     };
 
     // 验证必填字段
@@ -81,64 +81,46 @@ document.addEventListener('DOMContentLoaded', function () {
       saveFormConfig(formData);
     }
 
-    // 转换为GitHub Actions工作流需要的JSON格式参数
-    const workflowInputs = convertToWorkflowInputs(formData);
+    // 转换为GitHub Actions工作流需要的单一JSON格式参数
+    const workflowInputs = {
+      config: JSON.stringify({
+        repo: {
+          url: formData.repo_url,
+          branch: formData.repo_branch,
+          token: formData.repo_token
+        },
+        dockerfile: {
+          source: formData.dockerfile_source,
+          path: formData.dockerfile_path
+        },
+        docker: {
+          registry: formData.docker_registry,
+          username: formData.docker_username,
+          password: formData.docker_password
+        },
+        image: {
+          name: formData.image_name,
+          tag: formData.image_tag,
+          platforms: formData.platforms
+        }
+      }),
+      github_token: formData.github_token
+    };
 
     // 实际触发GitHub Actions工作流
     triggerGitHubWorkflow(formData, workflowInputs);
   });
 
-  // 将表单数据转换为GitHub Actions工作流需要的JSON格式参数
-  function convertToWorkflowInputs(formData) {
-    // 处理构建参数
-    let buildArgsObj = {};
-    if (formData.build_args) {
-      try {
-        buildArgsObj = JSON.parse(formData.build_args);
-      } catch (e) {
-        console.error('构建参数JSON格式错误:', e);
-        // 如果解析失败，使用空对象
-      }
+  // 获取选中的平台列表
+  function getSelectedPlatforms() {
+    // 获取所有选中的平台复选框
+    const checkboxes = document.querySelectorAll('input[name="platforms"]:checked');
+    if (checkboxes.length === 0) {
+      return 'linux/amd64'; // 默认值
     }
 
-    return {
-      // 代码仓库配置 (JSON格式)
-      repo_config: JSON.stringify({
-        url: formData.repo_url,
-        branch: formData.repo_branch,
-        token: formData.repo_token
-      }),
-
-      // Dockerfile配置 (JSON格式)
-      dockerfile_config: JSON.stringify({
-        source: formData.dockerfile_source,
-        path: formData.dockerfile_path
-      }),
-
-      // Docker仓库地址 (单独参数)
-      docker_registry: formData.docker_registry,
-
-      // Docker认证信息 (JSON格式)
-      docker_auth: JSON.stringify({
-        username: formData.docker_username,
-        password: formData.docker_password
-      }),
-
-      // 镜像配置 (JSON格式)
-      image_config: JSON.stringify({
-        name: formData.image_name,
-        tag: formData.image_tag
-      }),
-
-      // 构建参数 (JSON格式)
-      build_args: JSON.stringify(buildArgsObj),
-
-      // 构建平台
-      platforms: formData.platforms,
-
-      // GitHub Token (单独参数)
-      github_token: formData.github_token
-    };
+    // 将选中的值合并为逗号分隔的字符串
+    return Array.from(checkboxes).map(checkbox => checkbox.value).join(',');
   }
 
   // 验证表单数据
@@ -156,16 +138,6 @@ document.addEventListener('DOMContentLoaded', function () {
       return false;
     }
 
-    // 验证构建参数JSON格式
-    if (formData.build_args) {
-      try {
-        JSON.parse(formData.build_args);
-      } catch (e) {
-        alert('构建参数必须是有效的JSON格式');
-        return false;
-      }
-    }
-
     return true;
   }
 
@@ -180,8 +152,7 @@ document.addEventListener('DOMContentLoaded', function () {
       docker_username: formData.docker_username,
       image_name: formData.image_name,
       image_tag: formData.image_tag,
-      platforms: formData.platforms,
-      build_args: formData.build_args
+      platforms: formData.platforms
     };
 
     localStorage.setItem('budiu_builder_config', JSON.stringify(configToSave));
@@ -203,8 +174,6 @@ document.addEventListener('DOMContentLoaded', function () {
       if (config.docker_username) document.getElementById('docker-username').value = config.docker_username;
       if (config.image_name) document.getElementById('image-name').value = config.image_name;
       if (config.image_tag) document.getElementById('image-tag').value = config.image_tag;
-      if (config.platforms) document.getElementById('platforms').value = config.platforms;
-      if (config.build_args) document.getElementById('build-args').value = config.build_args;
 
       // 恢复Dockerfile来源选择
       if (config.dockerfile_source === 'upload') {
@@ -213,6 +182,15 @@ document.addEventListener('DOMContentLoaded', function () {
         uploadDockerfileSection.classList.remove('d-none');
       } else {
         document.getElementById('dockerfile-source-repo').checked = true;
+      }
+
+      // 恢复平台选择
+      if (config.platforms) {
+        const platforms = config.platforms.split(',');
+        platforms.forEach(platform => {
+          const checkbox = document.querySelector(`input[name="platforms"][value="${platform}"]`);
+          if (checkbox) checkbox.checked = true;
+        });
       }
     } catch (error) {
       console.error('恢复配置时出错:', error);

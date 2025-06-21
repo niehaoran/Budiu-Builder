@@ -4,7 +4,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Budiu Docker 构建器</title>
+  <title>Budiu Docker Builder Pro</title>
   <link rel="stylesheet" href="styles.css">
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css">
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.10.0/font/bootstrap-icons.css">
@@ -13,8 +13,8 @@
 <body>
   <div class="container">
     <header class="text-center my-4">
-      <h1>Budiu Docker 构建器</h1>
-      <p class="lead">使用GitHub Actions自动构建Docker镜像</p>
+      <h1>Budiu Docker Builder Pro</h1>
+      <p class="lead">使用GitHub Actions自动构建多平台Docker镜像</p>
     </header>
 
     <div class="card shadow mb-4">
@@ -119,23 +119,32 @@
                   <label for="image-tag" class="form-label">镜像标签</label>
                   <input type="text" id="image-tag" class="form-control" value="latest" required>
                 </div>
-              </div>
 
-              <div class="form-group mb-3">
-                <label for="platforms" class="form-label">构建平台</label>
-                <select class="form-select" id="platforms">
-                  <option value="linux/amd64" selected>linux/amd64 (x86_64)</option>
-                  <option value="linux/arm64">linux/arm64 (ARM 64位)</option>
-                  <option value="linux/arm/v7">linux/arm/v7 (ARM 32位)</option>
-                  <option value="linux/amd64,linux/arm64">多平台: AMD64 + ARM64</option>
-                </select>
-                <div class="form-text">选择Docker镜像构建的目标平台</div>
-              </div>
-
-              <div class="form-group mb-3">
-                <label for="build-args" class="form-label">构建参数 (可选)</label>
-                <input type="text" id="build-args" class="form-control" placeholder='{"key1":"value1","key2":"value2"}'>
-                <div class="form-text">JSON格式的构建参数，如: {"NODE_ENV":"production"}</div>
+                <div class="form-group mb-3">
+                  <label class="form-label">构建平台</label>
+                  <div class="form-check">
+                    <input class="form-check-input" type="checkbox" name="platforms" id="platform-amd64"
+                      value="linux/amd64" checked>
+                    <label class="form-check-label" for="platform-amd64">
+                      linux/amd64 (x86_64)
+                    </label>
+                  </div>
+                  <div class="form-check">
+                    <input class="form-check-input" type="checkbox" name="platforms" id="platform-arm64"
+                      value="linux/arm64">
+                    <label class="form-check-label" for="platform-arm64">
+                      linux/arm64 (ARM64/AArch64)
+                    </label>
+                  </div>
+                  <div class="form-check">
+                    <input class="form-check-input" type="checkbox" name="platforms" id="platform-armv7"
+                      value="linux/arm/v7">
+                    <label class="form-check-label" for="platform-armv7">
+                      linux/arm/v7 (ARM32v7)
+                    </label>
+                  </div>
+                  <div class="form-text">选择需要构建的目标平台（至少选择一项）</div>
+                </div>
               </div>
             </div>
           </div>
@@ -169,7 +178,7 @@
           <li><strong>选择Dockerfile来源</strong> - 使用仓库中的Dockerfile或上传自己的文件</li>
           <li><strong>提供Docker仓库信息</strong> - 输入您要推送镜像的Docker仓库凭据</li>
           <li><strong>设置镜像名称和标签</strong> - 为构建的Docker镜像命名</li>
-          <li><strong>选择构建平台</strong> - 指定目标系统架构（如x86_64或ARM）</li>
+          <li><strong>选择目标平台</strong> - 选择需要构建的硬件架构平台(x86_64, ARM等)</li>
           <li><strong>提供GitHub Token</strong> - 输入GitHub个人访问令牌以实现自动构建，无需等待批准</li>
           <li><strong>触发构建</strong> - 点击"触发构建"按钮启动GitHub Actions工作流</li>
         </ol>
@@ -195,11 +204,39 @@
         </div>
       </div>
     </div>
+
+    <div class="card shadow mb-4">
+      <div class="card-header bg-dark text-white">
+        <h2 class="h5 mb-0"><i class="bi bi-shield-check me-2"></i>安全特性</h2>
+      </div>
+      <div class="card-body">
+        <div class="row">
+          <div class="col-md-6">
+            <div class="d-flex align-items-center mb-3">
+              <div class="me-3 fs-3 text-success"><i class="bi bi-search"></i></div>
+              <div>
+                <h5 class="mb-1">镜像漏洞扫描</h5>
+                <p class="mb-0 small text-muted">自动扫描构建的镜像中的安全漏洞</p>
+              </div>
+            </div>
+          </div>
+          <div class="col-md-6">
+            <div class="d-flex align-items-center mb-3">
+              <div class="me-3 fs-3 text-success"><i class="bi bi-layers"></i></div>
+              <div>
+                <h5 class="mb-1">多架构支持</h5>
+                <p class="mb-0 small text-muted">同时构建x86和ARM架构镜像</p>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
   </div>
 
   <footer class="bg-light py-3 text-center">
     <div class="container">
-      <p class="mb-0">Budiu Docker 构建器 | <a href="https://github.com/your-username/Budiu-Builder"
+      <p class="mb-0">Budiu Docker Builder Pro | <a href="https://github.com/niehaoran/Budiu-Builder"
           target="_blank">GitHub仓库</a></p>
     </div>
   </footer>

@@ -1,4 +1,4 @@
-name: Docker Build Workflow
+name: Docker Builder Pro
 
 # 增加权限配置，允许自动运行
 permissions:
@@ -7,55 +7,19 @@ permissions:
   actions: write
 
 on:
+  push:
+    branches: [ main ]
+    paths:
+      - 'Dockerfile'
+      - 'src/**'
   workflow_dispatch:
     inputs:
-      repo_url:
-        description: '代码仓库地址'
+      config:
+        description: '构建配置 JSON (包含所有参数)'
         required: true
         type: string
-      repo_branch:
-        description: '代码仓库分支'
-        required: true
-        default: 'main'
-        type: string
-      repo_token:
-        description: '私有仓库访问令牌 (可选)'
-        required: false
-        type: string
-      dockerfile_path:
-        description: 'Dockerfile路径 (相对于仓库根目录)'
-        required: true
-        default: 'Dockerfile'
-        type: string
-      docker_registry:
-        description: 'Docker镜像仓库地址'
-        required: true
-        type: string
-        default: 'docker.io'
-      docker_username:
-        description: 'Docker仓库用户名'
-        required: true
-        type: string
-      docker_password:
-        description: 'Docker仓库密码/令牌'
-        required: true
-        type: string
-      image_name:
-        description: 'Docker镜像名称'
-        required: true
-        type: string
-      image_tag:
-        description: 'Docker镜像标签'
-        required: true
-        default: 'latest'
-        type: string
-      platforms:
-        description: '构建平台 (例如: linux/amd64,linux/arm64)'
-        required: false
-        type: string
-        default: 'linux/amd64'
       github_token:
-        description: 'GitHub Token (用于授权，可选)'
+        description: 'GitHub Token (授权用)'
         required: false
         type: string
 
@@ -64,75 +28,134 @@ jobs:
     runs-on: ubuntu-latest
     environment: production
     steps:
-      - name: 检出当前仓库代码
-        uses: actions/checkout@v4
+      - name: 检出代码
+        uses: actions/checkout@v3
         with:
           token: ${{ github.event.inputs.github_token || secrets.GITHUB_TOKEN }}
-      
-      - name: 克隆目标仓库
+
+      - name: 解析配置
+        id: config
         run: |
-          mkdir -p source_code
-          if [ -n "${{ github.event.inputs.repo_token }}" ]; then
-            # 私有仓库
-            REPO_URL=$(echo "${{ github.event.inputs.repo_url }}" | sed "s/https:\/\//https:\/\/${{ github.event.inputs.repo_token }}@/g")
-            git clone --branch ${{ github.event.inputs.repo_branch }} $REPO_URL ./source_code
+          if [ "${{ github.event_name }}" == "workflow_dispatch" ]; then
+            # 从手动触发的输入中解析配置
+            echo '${{ github.event.inputs.config }}' > config.json
+            
+            # 解析仓库信息
+            echo "repo_url=$(jq -r '.repo.url' config.json)" >> $GITHUB_OUTPUT
+            echo "repo_branch=$(jq -r '.repo.branch' config.json)" >> $GITHUB_OUTPUT
+            echo "repo_token=$(jq -r '.repo.token' config.json)" >> $GITHUB_OUTPUT
+            
+            # 解析Dockerfile配置
+            echo "dockerfile_source=$(jq -r '.dockerfile.source' config.json)" >> $GITHUB_OUTPUT
+            echo "dockerfile_path=$(jq -r '.dockerfile.path' config.json)" >> $GITHUB_OUTPUT
+            
+            # 解析Docker配置
+            echo "docker_registry=$(jq -r '.docker.registry' config.json)" >> $GITHUB_OUTPUT
+            echo "docker_username=$(jq -r '.docker.username' config.json)" >> $GITHUB_OUTPUT
+            echo "docker_password=$(jq -r '.docker.password' config.json)" >> $GITHUB_OUTPUT
+            
+            # 解析镜像配置
+            echo "image_name=$(jq -r '.image.name' config.json)" >> $GITHUB_OUTPUT
+            echo "image_tag=$(jq -r '.image.tag' config.json)" >> $GITHUB_OUTPUT
+            echo "platforms=$(jq -r '.image.platforms' config.json)" >> $GITHUB_OUTPUT
           else
-            # 公开仓库
-            git clone --branch ${{ github.event.inputs.repo_branch }} ${{ github.event.inputs.repo_url }} ./source_code
+            # 从推送事件获取默认配置
+            echo "使用默认构建配置"
+            # 设置默认值
+            echo "repo_url=$GITHUB_SERVER_URL/$GITHUB_REPOSITORY" >> $GITHUB_OUTPUT
+            echo "repo_branch=$GITHUB_REF_NAME" >> $GITHUB_OUTPUT
+            echo "dockerfile_source=repo" >> $GITHUB_OUTPUT
+            echo "dockerfile_path=Dockerfile" >> $GITHUB_OUTPUT
+            echo "platforms=linux/amd64,linux/arm64" >> $GITHUB_OUTPUT
+            
+            # 这些仍需要从仓库Secrets获取
+            echo "docker_registry=${{ secrets.DOCKER_REGISTRY }}" >> $GITHUB_OUTPUT
+            echo "docker_username=${{ secrets.DOCKER_USERNAME }}" >> $GITHUB_OUTPUT
+            echo "docker_password=${{ secrets.DOCKER_PASSWORD }}" >> $GITHUB_OUTPUT
+            echo "image_name=${{ secrets.IMAGE_NAME || github.event.repository.name }}" >> $GITHUB_OUTPUT
+            echo "image_tag=latest" >> $GITHUB_OUTPUT
           fi
-      
-      - name: 检查Dockerfile
+
+      - name: 创建工作目录
+        run: mkdir -p workspace
+
+      - name: 克隆目标仓库
+        if: ${{ github.event_name == 'workflow_dispatch' }}
         run: |
-          DOCKERFILE_PATH="./source_code/${{ github.event.inputs.dockerfile_path }}"
-          if [ ! -f "$DOCKERFILE_PATH" ]; then
-            echo "错误: Dockerfile不存在于路径: $DOCKERFILE_PATH"
-            exit 1
+          if [ -n "${{ steps.config.outputs.repo_token }}" ]; then
+            REPO_URL=$(echo "${{ steps.config.outputs.repo_url }}" | sed "s/https:\/\//https:\/\/${{ steps.config.outputs.repo_token }}@/g")
+            git clone --branch ${{ steps.config.outputs.repo_branch }} $REPO_URL ./source_code
+          else
+            git clone --branch ${{ steps.config.outputs.repo_branch }} ${{ steps.config.outputs.repo_url }} ./source_code
           fi
-          echo "Dockerfile内容:"
-          cat "$DOCKERFILE_PATH"
-      
-      - name: 预处理Dockerfile
+
+      - name: 准备源代码
+        if: ${{ github.event_name == 'push' }}
         run: |
-          DOCKERFILE_PATH="./source_code/${{ github.event.inputs.dockerfile_path }}"
-          # 检查是否需要创建特定目录
-          if grep -q "chmod.*-R.*777.*\/var\/www\/html\/" "$DOCKERFILE_PATH"; then
-            echo "检测到需要预创建目录的命令，修改Dockerfile"
-            sed -i 's|chown -R www-data:www-data /var/www/html|mkdir -p /var/www/html/install /var/www/html/file \&\& chown -R www-data:www-data /var/www/html|g' "$DOCKERFILE_PATH"
-            echo "修改后的Dockerfile:"
-            cat "$DOCKERFILE_PATH"
+          # 直接使用检出的代码
+          cp -r . ./source_code
+
+      - name: 准备Dockerfile
+        run: |
+          if [ "${{ steps.config.outputs.dockerfile_source }}" == "repo" ]; then
+            echo "使用仓库中的Dockerfile: ${{ steps.config.outputs.dockerfile_path }}"
+            cp -f ./source_code/${{ steps.config.outputs.dockerfile_path }} ./Dockerfile
+            if [ ! -f "./Dockerfile" ]; then
+              echo "错误: 在仓库中找不到指定的Dockerfile!"
+              exit 1
+            fi
+          else
+            echo "使用上传的Dockerfile"
+            # 前端上传的Dockerfile会通过API保存
+            if [ ! -f "./uploads/Dockerfile" ]; then
+              echo "错误: 未找到上传的Dockerfile!"
+              exit 1
+            fi
+            cp -f ./uploads/Dockerfile ./Dockerfile
           fi
-      
-      # 设置QEMU支持多平台构建
-      - name: 设置QEMU
-        uses: docker/setup-qemu-action@v3
-      
-      # 设置Docker Buildx
+          cat ./Dockerfile
+
       - name: 设置Docker Buildx
-        uses: docker/setup-buildx-action@v3
-      
-      # 登录到Docker镜像仓库
-      - name: 登录到Docker仓库
-        uses: docker/login-action@v3
+        id: buildx
+        uses: docker/setup-buildx-action@v2
         with:
-          registry: ${{ github.event.inputs.docker_registry }}
-          username: ${{ github.event.inputs.docker_username }}
-          password: ${{ github.event.inputs.docker_password }}
-      
-      # 构建并推送Docker镜像
+          version: latest
+
+      - name: 登录到Docker仓库
+        uses: docker/login-action@v2
+        with:
+          registry: ${{ steps.config.outputs.docker_registry }}
+          username: ${{ steps.config.outputs.docker_username }}
+          password: ${{ steps.config.outputs.docker_password }}
+
       - name: 构建并推送Docker镜像
-        uses: docker/build-push-action@v5
+        uses: docker/build-push-action@v4
         with:
           context: ./source_code
-          file: ./source_code/${{ github.event.inputs.dockerfile_path }}
+          file: ./Dockerfile
           push: true
-          tags: ${{ github.event.inputs.docker_registry }}/${{ github.event.inputs.image_name }}:${{ github.event.inputs.image_tag }}
-          platforms: ${{ github.event.inputs.platforms }}
+          tags: ${{ steps.config.outputs.docker_registry }}/${{ steps.config.outputs.image_name }}:${{ steps.config.outputs.image_tag }}
+          platforms: ${{ steps.config.outputs.platforms }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
-      
-      # 显示构建结果
+          provenance: false
+
+      - name: 镜像安全扫描
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: ${{ steps.config.outputs.docker_registry }}/${{ steps.config.outputs.image_name }}:${{ steps.config.outputs.image_tag }}
+          format: 'sarif'
+          output: 'trivy-results.sarif'
+          severity: 'CRITICAL,HIGH'
+          timeout: '10m'
+
+      - name: 上传扫描结果
+        uses: github/codeql-action/upload-sarif@v2
+        with:
+          sarif_file: 'trivy-results.sarif'
+
       - name: 构建结果
         run: |
           echo "Docker镜像构建完成!"
-          echo "镜像: ${{ github.event.inputs.docker_registry }}/${{ github.event.inputs.image_name }}:${{ github.event.inputs.image_tag }}"
-          echo "构建平台: ${{ github.event.inputs.platforms }}" 
+          echo "镜像: ${{ steps.config.outputs.docker_registry }}/${{ steps.config.outputs.image_name }}:${{ steps.config.outputs.image_tag }}"
+          echo "平台: ${{ steps.config.outputs.platforms }}" 

@@ -26,39 +26,42 @@
           <div class="row mb-3">
             <div class="col-md-6">
               <div class="form-group mb-3">
-                <label for="repo-url" class="form-label">代码仓库地址</label>
-                <input type="text" id="repo-url" class="form-control"
-                  placeholder="https://github.com/username/repository" required>
-                <div class="form-text">GitHub或Gitee等仓库的地址</div>
-              </div>
+                <label class="form-label fw-bold">代码仓库配置</label>
+                <div class="form-group mb-3">
+                  <label for="repo-url" class="form-label">代码仓库地址</label>
+                  <input type="text" id="repo-url" class="form-control"
+                    placeholder="https://github.com/username/repository" required>
+                  <div class="form-text">GitHub或Gitee等仓库的地址</div>
+                </div>
 
-              <div class="form-group mb-3">
-                <label for="repo-branch" class="form-label">代码仓库分支</label>
-                <input type="text" id="repo-branch" class="form-control" value="main" required>
-              </div>
+                <div class="form-group mb-3">
+                  <label for="repo-branch" class="form-label">代码仓库分支</label>
+                  <input type="text" id="repo-branch" class="form-control" value="main" required>
+                </div>
 
-              <div class="form-group mb-3">
-                <label for="repo-token" class="form-label">私有仓库访问令牌 (可选)</label>
-                <input type="password" id="repo-token" class="form-control" placeholder="私有仓库才需要填写">
-                <div class="form-text">如果仓库是私有的，需要提供访问令牌</div>
-              </div>
+                <div class="form-group mb-3">
+                  <label for="repo-token" class="form-label">私有仓库访问令牌 (可选)</label>
+                  <input type="password" id="repo-token" class="form-control" placeholder="私有仓库才需要填写">
+                  <div class="form-text">如果仓库是私有的，需要提供访问令牌</div>
+                </div>
 
-              <div class="form-group mb-3">
-                <label for="github-token" class="form-label">GitHub Token (用于自动授权)</label>
-                <input type="password" id="github-token" class="form-control" placeholder="输入GitHub个人访问令牌">
-                <div class="form-text">提供GitHub个人访问令牌可避免需要手动批准构建</div>
+                <div class="form-group mb-3">
+                  <label for="github-token" class="form-label">GitHub Token (用于自动授权)</label>
+                  <input type="password" id="github-token" class="form-control" placeholder="输入GitHub个人访问令牌">
+                  <div class="form-text">提供GitHub个人访问令牌可避免需要手动批准构建</div>
+                </div>
               </div>
             </div>
 
             <div class="col-md-6">
               <div class="form-group mb-3">
-                <label class="form-label d-block">Dockerfile来源</label>
-                <div class="form-check form-check-inline">
+                <label class="form-label fw-bold">Dockerfile配置</label>
+                <div class="form-check form-check-inline mb-2">
                   <input class="form-check-input" type="radio" name="dockerfile-source" id="dockerfile-source-repo"
                     value="repo" checked>
                   <label class="form-check-label" for="dockerfile-source-repo">使用仓库中的Dockerfile</label>
                 </div>
-                <div class="form-check form-check-inline">
+                <div class="form-check form-check-inline mb-2">
                   <input class="form-check-input" type="radio" name="dockerfile-source" id="dockerfile-source-upload"
                     value="upload">
                   <label class="form-check-label" for="dockerfile-source-upload">上传Dockerfile</label>
@@ -90,26 +93,32 @@
               </div>
 
               <div class="form-group mb-3">
-                <label for="docker-username" class="form-label">Docker仓库用户名</label>
-                <input type="text" id="docker-username" class="form-control" required>
-              </div>
+                <label class="form-label fw-bold">Docker认证</label>
+                <div class="form-group mb-3">
+                  <label for="docker-username" class="form-label">Docker仓库用户名</label>
+                  <input type="text" id="docker-username" class="form-control" required>
+                </div>
 
-              <div class="form-group mb-3">
-                <label for="docker-password" class="form-label">Docker仓库密码/令牌</label>
-                <input type="password" id="docker-password" class="form-control" required>
+                <div class="form-group mb-3">
+                  <label for="docker-password" class="form-label">Docker仓库密码/令牌</label>
+                  <input type="password" id="docker-password" class="form-control" required>
+                </div>
               </div>
             </div>
 
             <div class="col-md-6">
               <div class="form-group mb-3">
-                <label for="image-name" class="form-label">镜像名称</label>
-                <input type="text" id="image-name" class="form-control" required>
-                <div class="form-text">不需要包含仓库地址，例如：myapp</div>
-              </div>
+                <label class="form-label fw-bold">镜像配置</label>
+                <div class="form-group mb-3">
+                  <label for="image-name" class="form-label">镜像名称</label>
+                  <input type="text" id="image-name" class="form-control" required>
+                  <div class="form-text">不需要包含仓库地址，例如：myapp</div>
+                </div>
 
-              <div class="form-group mb-3">
-                <label for="image-tag" class="form-label">镜像标签</label>
-                <input type="text" id="image-tag" class="form-control" value="latest" required>
+                <div class="form-group mb-3">
+                  <label for="image-tag" class="form-label">镜像标签</label>
+                  <input type="text" id="image-tag" class="form-control" value="latest" required>
+                </div>
               </div>
             </div>
           </div>

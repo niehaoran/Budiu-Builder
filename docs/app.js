@@ -35,7 +35,7 @@ document.addEventListener('DOMContentLoaded', function () {
     // 显示加载状态
     updateBuildStatus('info', '正在验证和准备提交构建请求...');
 
-    // 收集表单数据
+    // 收集表单基础数据
     const formData = {
       repo_url: document.getElementById('repo-url').value,
       repo_branch: document.getElementById('repo-branch').value,
@@ -70,9 +70,48 @@ document.addEventListener('DOMContentLoaded', function () {
       saveFormConfig(formData);
     }
 
-    // 这里模拟触发GitHub Actions工作流，实际使用GitHub REST API
-    triggerGitHubWorkflow(formData);
+    // 转换为GitHub Actions工作流需要的JSON格式参数
+    const workflowInputs = convertToWorkflowInputs(formData);
+
+    // 触发GitHub Actions工作流
+    triggerGitHubWorkflow(formData, workflowInputs);
   });
+
+  // 将表单数据转换为GitHub Actions工作流需要的JSON格式参数
+  function convertToWorkflowInputs(formData) {
+    return {
+      // 代码仓库配置 (JSON格式)
+      repo_config: JSON.stringify({
+        url: formData.repo_url,
+        branch: formData.repo_branch,
+        token: formData.repo_token
+      }),
+
+      // Dockerfile配置 (JSON格式)
+      dockerfile_config: JSON.stringify({
+        source: formData.dockerfile_source,
+        path: formData.dockerfile_path
+      }),
+
+      // Docker仓库地址 (单独参数)
+      docker_registry: formData.docker_registry,
+
+      // Docker认证信息 (JSON格式)
+      docker_auth: JSON.stringify({
+        username: formData.docker_username,
+        password: formData.docker_password
+      }),
+
+      // 镜像配置 (JSON格式)
+      image_config: JSON.stringify({
+        name: formData.image_name,
+        tag: formData.image_tag
+      }),
+
+      // GitHub Token (单独参数)
+      github_token: formData.github_token
+    };
+  }
 
   // 验证表单数据
   function validateForm(formData) {
@@ -145,7 +184,7 @@ document.addEventListener('DOMContentLoaded', function () {
   }
 
   // 模拟触发GitHub Actions工作流
-  function triggerGitHubWorkflow(formData) {
+  function triggerGitHubWorkflow(formData, workflowInputs) {
     // 在实际应用中，这里会使用GitHub REST API调用workflow_dispatch事件
     // 为了演示，我们模拟API调用过程
 
@@ -178,19 +217,7 @@ document.addEventListener('DOMContentLoaded', function () {
         method: 'POST',
         payload: {
           ref: 'main',
-          inputs: {
-            repo_url: formData.repo_url,
-            repo_branch: formData.repo_branch,
-            repo_token: '*** 已隐藏 ***',
-            github_token: '*** 已隐藏 ***',
-            dockerfile_source: formData.dockerfile_source,
-            dockerfile_path: formData.dockerfile_path,
-            docker_registry: formData.docker_registry,
-            docker_username: formData.docker_username,
-            docker_password: '*** 已隐藏 ***',
-            image_name: formData.image_name,
-            image_tag: formData.image_tag
-          }
+          inputs: workflowInputs
         }
       });
     }, 1500);

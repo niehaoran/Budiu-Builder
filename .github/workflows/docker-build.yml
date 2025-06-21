@@ -1,5 +1,11 @@
 name: Docker Build Workflow
 
+# 增加权限配置，允许自动运行
+permissions:
+  contents: write
+  packages: write
+  actions: write
+
 on:
   workflow_dispatch:
     inputs:
@@ -50,10 +56,16 @@ on:
         required: true
         default: 'latest'
         type: string
+      github_token:
+        description: 'GitHub Token (用于自动授权，可选)'
+        required: false
+        type: string
 
 jobs:
   build-and-push:
     runs-on: ubuntu-latest
+    # 添加环境配置，使工作流可以直接运行
+    environment: production
     steps:
       - name: 检查参数
         run: |
@@ -67,6 +79,8 @@ jobs:
         with:
           repository: ${{ github.repository }}
           ref: main
+          # 使用GitHub Token进行授权，优先使用传入的token，否则使用默认token
+          token: ${{ github.event.inputs.github_token || secrets.GITHUB_TOKEN }}
 
       - name: 创建工作目录
         run: |

@@ -40,6 +40,7 @@ document.addEventListener('DOMContentLoaded', function () {
       repo_url: document.getElementById('repo-url').value,
       repo_branch: document.getElementById('repo-branch').value,
       repo_token: document.getElementById('repo-token').value,
+      github_token: document.getElementById('github-token').value,
       dockerfile_source: document.querySelector('input[name="dockerfile-source"]:checked').value,
       dockerfile_path: document.getElementById('dockerfile-path').value,
       docker_registry: document.getElementById('docker-registry').value,
@@ -150,6 +151,13 @@ document.addEventListener('DOMContentLoaded', function () {
 
     updateBuildStatus('warning', '<i class="bi bi-hourglass-split me-2"></i>正在提交构建请求到GitHub Actions...');
 
+    // 添加关于GitHub Token的状态消息
+    if (formData.github_token) {
+      updateBuildStatus('warning', '<i class="bi bi-hourglass-split me-2"></i>正在提交构建请求到GitHub Actions... (已提供GitHub Token，将自动授权构建)');
+    } else {
+      updateBuildStatus('warning', '<i class="bi bi-hourglass-split me-2"></i>正在提交构建请求到GitHub Actions... (未提供GitHub Token，可能需要手动批准构建)');
+    }
+
     // 模拟API响应延迟
     setTimeout(function () {
       // 模拟成功响应
@@ -174,6 +182,7 @@ document.addEventListener('DOMContentLoaded', function () {
             repo_url: formData.repo_url,
             repo_branch: formData.repo_branch,
             repo_token: '*** 已隐藏 ***',
+            github_token: '*** 已隐藏 ***',
             dockerfile_source: formData.dockerfile_source,
             dockerfile_path: formData.dockerfile_path,
             docker_registry: formData.docker_registry,

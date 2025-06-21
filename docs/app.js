@@ -44,8 +44,7 @@ document.addEventListener('DOMContentLoaded', function () {
       dockerfile_source: document.querySelector('input[name="dockerfile-source"]:checked').value,
       dockerfile_path: document.getElementById('dockerfile-path').value,
       docker_registry: document.getElementById('docker-registry').value,
-      docker_username: document.getElementById('docker-username').value,
-      docker_password: document.getElementById('docker-password').value,
+      docker_auth: document.getElementById('docker-auth').value,
       image_name: document.getElementById('image-name').value,
       image_tag: document.getElementById('image-tag').value
     };
@@ -77,11 +76,17 @@ document.addEventListener('DOMContentLoaded', function () {
   // 验证表单数据
   function validateForm(formData) {
     // 检查必填字段
-    const requiredFields = ['repo_url', 'repo_branch', 'docker_registry', 'docker_username', 'docker_password', 'image_name', 'image_tag'];
+    const requiredFields = ['repo_url', 'repo_branch', 'docker_registry', 'docker_auth', 'image_name', 'image_tag'];
     for (const field of requiredFields) {
       if (!formData[field]) {
         return false;
       }
+    }
+
+    // 验证Docker认证信息格式 (格式: 用户名:密码)
+    if (formData.docker_auth && !formData.docker_auth.includes(':')) {
+      updateBuildStatus('danger', 'Docker认证信息格式错误，应为 "用户名:密码"');
+      return false;
     }
 
     // 如果选择从仓库使用Dockerfile，则需要dockerfile_path
@@ -100,9 +105,9 @@ document.addEventListener('DOMContentLoaded', function () {
       dockerfile_source: formData.dockerfile_source,
       dockerfile_path: formData.dockerfile_path,
       docker_registry: formData.docker_registry,
-      docker_username: formData.docker_username,
       image_name: formData.image_name,
       image_tag: formData.image_tag
+      // 注意：不保存github_token、docker_auth等敏感信息
     };
 
     localStorage.setItem('budiu_builder_config', JSON.stringify(configToSave));
@@ -121,7 +126,6 @@ document.addEventListener('DOMContentLoaded', function () {
       if (config.repo_branch) document.getElementById('repo-branch').value = config.repo_branch;
       if (config.dockerfile_path) document.getElementById('dockerfile-path').value = config.dockerfile_path;
       if (config.docker_registry) document.getElementById('docker-registry').value = config.docker_registry;
-      if (config.docker_username) document.getElementById('docker-username').value = config.docker_username;
       if (config.image_name) document.getElementById('image-name').value = config.image_name;
       if (config.image_tag) document.getElementById('image-tag').value = config.image_tag;
 
@@ -186,8 +190,7 @@ document.addEventListener('DOMContentLoaded', function () {
             dockerfile_source: formData.dockerfile_source,
             dockerfile_path: formData.dockerfile_path,
             docker_registry: formData.docker_registry,
-            docker_username: formData.docker_username,
-            docker_password: '*** 已隐藏 ***',
+            docker_auth: '*** 已隐藏 ***',
             image_name: formData.image_name,
             image_tag: formData.image_tag
           }

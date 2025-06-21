@@ -90,13 +90,9 @@
               </div>
 
               <div class="form-group mb-3">
-                <label for="docker-username" class="form-label">Docker仓库用户名</label>
-                <input type="text" id="docker-username" class="form-control" required>
-              </div>
-
-              <div class="form-group mb-3">
-                <label for="docker-password" class="form-label">Docker仓库密码/令牌</label>
-                <input type="password" id="docker-password" class="form-control" required>
+                <label for="docker-auth" class="form-label">Docker认证信息</label>
+                <input type="password" id="docker-auth" class="form-control" placeholder="格式: 用户名:密码" required>
+                <div class="form-text">格式为"用户名:密码"，例如: myuser:mypassword</div>
               </div>
             </div>
 
@@ -141,7 +137,7 @@
         <ol>
           <li><strong>填写仓库信息</strong> - 输入您的代码仓库地址和分支信息</li>
           <li><strong>选择Dockerfile来源</strong> - 使用仓库中的Dockerfile或上传自己的文件</li>
-          <li><strong>提供Docker仓库信息</strong> - 输入您要推送镜像的Docker仓库凭据</li>
+          <li><strong>提供Docker仓库信息</strong> - 输入您要推送镜像的Docker仓库凭据 (格式: 用户名:密码)</li>
           <li><strong>设置镜像名称和标签</strong> - 为构建的Docker镜像命名</li>
           <li><strong>提供GitHub Token</strong> - 输入GitHub个人访问令牌以实现自动构建，无需等待批准</li>
           <li><strong>触发构建</strong> - 点击"触发构建"按钮启动GitHub Actions工作流</li>

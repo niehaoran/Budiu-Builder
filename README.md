@@ -33,8 +33,7 @@
 | `dockerfile_source` | Dockerfile来源 (`repo`或`upload`) | 是，默认`repo` |
 | `dockerfile_path` | 仓库中的Dockerfile路径 | 在`dockerfile_source=repo`时必须 |
 | `docker_registry` | Docker镜像仓库地址 | 是 |
-| `docker_username` | Docker仓库用户名 | 是 |
-| `docker_password` | Docker仓库密码/令牌 | 是 |
+| `docker_auth` | Docker认证信息 (格式: 用户名:密码) | 是 |
 | `image_name` | Docker镜像名称 | 是 |
 | `image_tag` | Docker镜像标签 | 是，默认`latest` |
 

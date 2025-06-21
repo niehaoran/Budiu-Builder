@@ -52,7 +52,9 @@ document.addEventListener('DOMContentLoaded', function () {
       docker_username: document.getElementById('docker-username').value,
       docker_password: document.getElementById('docker-password').value,
       image_name: document.getElementById('image-name').value,
-      image_tag: document.getElementById('image-tag').value
+      image_tag: document.getElementById('image-tag').value,
+      platforms: document.getElementById('platforms').value,
+      build_args: document.getElementById('build-args').value
     };
 
     // 验证必填字段
@@ -88,6 +90,17 @@ document.addEventListener('DOMContentLoaded', function () {
 
   // 将表单数据转换为GitHub Actions工作流需要的JSON格式参数
   function convertToWorkflowInputs(formData) {
+    // 处理构建参数
+    let buildArgsObj = {};
+    if (formData.build_args) {
+      try {
+        buildArgsObj = JSON.parse(formData.build_args);
+      } catch (e) {
+        console.error('构建参数JSON格式错误:', e);
+        // 如果解析失败，使用空对象
+      }
+    }
+
     return {
       // 代码仓库配置 (JSON格式)
       repo_config: JSON.stringify({
@@ -117,6 +130,12 @@ document.addEventListener('DOMContentLoaded', function () {
         tag: formData.image_tag
       }),
 
+      // 构建参数 (JSON格式)
+      build_args: JSON.stringify(buildArgsObj),
+
+      // 构建平台
+      platforms: formData.platforms,
+
       // GitHub Token (单独参数)
       github_token: formData.github_token
     };
@@ -137,6 +156,16 @@ document.addEventListener('DOMContentLoaded', function () {
       return false;
     }
 
+    // 验证构建参数JSON格式
+    if (formData.build_args) {
+      try {
+        JSON.parse(formData.build_args);
+      } catch (e) {
+        alert('构建参数必须是有效的JSON格式');
+        return false;
+      }
+    }
+
     return true;
   }
 
@@ -150,7 +179,9 @@ document.addEventListener('DOMContentLoaded', function () {
       docker_registry: formData.docker_registry,
       docker_username: formData.docker_username,
       image_name: formData.image_name,
-      image_tag: formData.image_tag
+      image_tag: formData.image_tag,
+      platforms: formData.platforms,
+      build_args: formData.build_args
     };
 
     localStorage.setItem('budiu_builder_config', JSON.stringify(configToSave));
@@ -172,6 +203,8 @@ document.addEventListener('DOMContentLoaded', function () {
       if (config.docker_username) document.getElementById('docker-username').value = config.docker_username;
       if (config.image_name) document.getElementById('image-name').value = config.image_name;
       if (config.image_tag) document.getElementById('image-tag').value = config.image_tag;
+      if (config.platforms) document.getElementById('platforms').value = config.platforms;
+      if (config.build_args) document.getElementById('build-args').value = config.build_args;
 
       // 恢复Dockerfile来源选择
       if (config.dockerfile_source === 'upload') {

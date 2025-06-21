@@ -169,12 +169,12 @@ jobs:
       - name: 提取构建参数
         id: build_args
         run: |
-          BUILD_ARGS_JSON='{}'
           if [ -n "${{ github.event.inputs.build_args }}" ] && [ "${{ github.event.inputs.build_args }}" != "{}" ]; then
             echo "处理构建参数..."
-            BUILD_ARGS_JSON='${{ github.event.inputs.build_args }}'
+            echo "args=${{ github.event.inputs.build_args }}" >> $GITHUB_OUTPUT
+          else
+            echo "args={}" >> $GITHUB_OUTPUT
           fi
-          echo "args=$BUILD_ARGS_JSON" >> $GITHUB_OUTPUT
 
       # 使用Docker Buildx构建并推送镜像
       - name: 构建并推送Docker镜像
@@ -187,7 +187,7 @@ jobs:
           platforms: ${{ github.event.inputs.platforms }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
-          build-args: ${{ fromJSON(steps.build_args.outputs.args) }}
+          build-args: ${{ fromJson(steps.build_args.outputs.args) }}
 
       - name: 构建结果
         run: |

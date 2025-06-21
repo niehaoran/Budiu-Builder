@@ -120,6 +120,23 @@
                   <input type="text" id="image-tag" class="form-control" value="latest" required>
                 </div>
               </div>
+
+              <div class="form-group mb-3">
+                <label for="platforms" class="form-label">构建平台</label>
+                <select class="form-select" id="platforms">
+                  <option value="linux/amd64" selected>linux/amd64 (x86_64)</option>
+                  <option value="linux/arm64">linux/arm64 (ARM 64位)</option>
+                  <option value="linux/arm/v7">linux/arm/v7 (ARM 32位)</option>
+                  <option value="linux/amd64,linux/arm64">多平台: AMD64 + ARM64</option>
+                </select>
+                <div class="form-text">选择Docker镜像构建的目标平台</div>
+              </div>
+
+              <div class="form-group mb-3">
+                <label for="build-args" class="form-label">构建参数 (可选)</label>
+                <input type="text" id="build-args" class="form-control" placeholder='{"key1":"value1","key2":"value2"}'>
+                <div class="form-text">JSON格式的构建参数，如: {"NODE_ENV":"production"}</div>
+              </div>
             </div>
           </div>
 
@@ -152,6 +169,7 @@
           <li><strong>选择Dockerfile来源</strong> - 使用仓库中的Dockerfile或上传自己的文件</li>
           <li><strong>提供Docker仓库信息</strong> - 输入您要推送镜像的Docker仓库凭据</li>
           <li><strong>设置镜像名称和标签</strong> - 为构建的Docker镜像命名</li>
+          <li><strong>选择构建平台</strong> - 指定目标系统架构（如x86_64或ARM）</li>
           <li><strong>提供GitHub Token</strong> - 输入GitHub个人访问令牌以实现自动构建，无需等待批准</li>
           <li><strong>触发构建</strong> - 点击"触发构建"按钮启动GitHub Actions工作流</li>
         </ol>

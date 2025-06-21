@@ -5,6 +5,8 @@ permissions:
   contents: write
   packages: write
   actions: write
+  # 添加安全事件写入权限，用于上传扫描结果
+  security-events: write
 
 on:
   push:
@@ -183,9 +185,10 @@ jobs:
           timeout: '10m'
 
       - name: 上传扫描结果
-        uses: github/codeql-action/upload-sarif@v2
+        uses: github/codeql-action/upload-sarif@v3
         with:
           sarif_file: 'trivy-results.sarif'
+          category: 'trivy'
 
       - name: 构建结果
         run: |

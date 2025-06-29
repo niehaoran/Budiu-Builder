@@ -197,10 +197,42 @@
         <div id="build-status" class="alert alert-secondary text-center">
           <p class="mb-0">尚未触发任何构建</p>
         </div>
-        <div id="build-link-container" class="d-none text-center">
+        <div id="build-link-container" class="d-none text-center mb-3">
           <a id="build-link" href="#" target="_blank" class="btn btn-outline-primary">
             <i class="bi bi-github me-2"></i>查看GitHub Actions构建详情
           </a>
+        </div>
+
+        <!-- 构建日志查看组件 -->
+        <div id="build-logs-container" class="d-none">
+          <div class="d-flex justify-content-between align-items-center mb-2">
+            <h5 class="mb-0"><i class="bi bi-terminal-fill me-2"></i>实时构建日志</h5>
+            <div>
+              <button id="refresh-logs" class="btn btn-sm btn-outline-secondary">
+                <i class="bi bi-arrow-clockwise"></i> 刷新
+              </button>
+              <button id="toggle-autoscroll" class="btn btn-sm btn-outline-primary active">
+                <i class="bi bi-arrow-down-square"></i> 自动滚动
+              </button>
+            </div>
+          </div>
+          <div id="build-logs" class="build-log-container">
+            <div class="text-center text-muted p-3">
+              <i class="bi bi-hourglass me-2"></i>等待构建日志...
+            </div>
+          </div>
+
+          <!-- 构建步骤进度 -->
+          <div class="mt-3">
+            <h6 class="mb-2">构建进度</h6>
+            <div id="build-progress" class="progress mb-2">
+              <div class="progress-bar progress-bar-striped progress-bar-animated" role="progressbar" style="width: 0%">
+              </div>
+            </div>
+            <div id="build-steps" class="build-steps">
+              <!-- 构建步骤将在这里动态添加 -->
+            </div>
+          </div>
         </div>
       </div>
     </div>

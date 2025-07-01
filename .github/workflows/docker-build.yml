@@ -87,49 +87,85 @@ jobs:
           fi
           
           echo "开始解密敏感信息..."
+          
+          # 检查加密数据长度
+          ENCRYPTED_LENGTH=$(echo -n "$ENCRYPTED_DATA" | wc -c)
+          echo "加密数据长度: $ENCRYPTED_LENGTH 字符"
+          
           # 将私钥保存到临时文件
           echo "$PRIVATE_KEY" > private_key.pem
           chmod 600 private_key.pem
           
-          # 解码base64并解密数据
-          echo "$ENCRYPTED_DATA" | base64 -d > encrypted_data.bin || {
-            echo "错误: 无法解码base64数据"
-            exit 1
-          }
-          
-          openssl pkeyutl -decrypt -inkey private_key.pem -in encrypted_data.bin -out decrypted_data.json || {
-            echo "错误: 无法解密数据，请检查私钥是否正确"
-            exit 1
-          }
-          
-          # 检查解密后的文件是否为有效JSON
-          if ! jq empty decrypted_data.json 2>/dev/null; then
-            echo "错误: 解密后的数据不是有效的JSON"
+          # 检查私钥是否有效
+          if ! openssl rsa -check -noout -in private_key.pem > /dev/null 2>&1; then
+            echo "错误: 提供的私钥无效"
             exit 1
           fi
           
+          echo "私钥有效，继续解密..."
+          
+          # 解码base64并解密数据
+          echo "$ENCRYPTED_DATA" | base64 -d > encrypted_data.bin || {
+            echo "错误: 无法解码base64数据"
+            echo "请确保前端传递的是有效的base64编码字符串"
+            echo "加密数据前缀: $(echo "$ENCRYPTED_DATA" | cut -c 1-20)..."
+            exit 1
+          }
+          
+          # 显示加密数据大小
+          BINARY_SIZE=$(stat -c%s "encrypted_data.bin")
+          echo "解码后的加密数据大小: $BINARY_SIZE 字节"
+          
+          # 使用更详细的错误输出
+          if ! openssl pkeyutl -decrypt -inkey private_key.pem -in encrypted_data.bin -out decrypted_data.txt -pkeyopt rsa_padding_mode:oaep -pkeyopt rsa_oaep_md:sha256; then
+            echo "错误: 无法解密数据，可能原因:"
+            echo "1. 私钥和加密时使用的公钥不匹配"
+            echo "2. 加密数据已被破坏或修改"
+            echo "3. 加密和解密使用了不同的填充方式或哈希算法"
+            exit 1
+          fi
+          
+          # 输出解密结果前缀
+          echo "解密成功，解密后数据前缀: $(head -c 20 decrypted_data.txt)..."
+          
+          # 检查解密后的文件是否为有效JSON
+          if ! jq empty decrypted_data.txt 2>/dev/null; then
+            echo "错误: 解密后的数据不是有效的JSON"
+            echo "解密后数据内容(前100个字符):"
+            head -c 100 decrypted_data.txt
+            echo ""
+            echo "完整解密数据长度: $(wc -c < decrypted_data.txt) 字节"
+            exit 1
+          fi
+          
+          echo "解密数据是有效的JSON"
+          
           # 读取解密后的数据
-          DOCKER_PASSWORD=$(jq -r '.docker_password' decrypted_data.json)
+          DOCKER_PASSWORD=$(jq -r '.docker_password' decrypted_data.txt)
           
           # 检查是否成功获取Docker密码
           if [ "$DOCKER_PASSWORD" = "null" ] || [ -z "$DOCKER_PASSWORD" ]; then
             echo "错误: 未从解密数据中找到docker_password"
+            echo "解密后的JSON字段: $(jq 'keys' decrypted_data.txt)"
             exit 1
           else
             echo "成功获取Docker密码"
+            # 不显示密码，但显示长度
+            echo "Docker密码长度: ${#DOCKER_PASSWORD} 字符"
             echo "docker_password=$DOCKER_PASSWORD" >> $GITHUB_OUTPUT
           fi
           
           # 获取额外的敏感数据（如果有）
-          OTHER_TOKEN=$(jq -r '.repo_token // ""' decrypted_data.json)
+          OTHER_TOKEN=$(jq -r '.repo_token // ""' decrypted_data.txt)
           if [ -n "$OTHER_TOKEN" ] && [ "$OTHER_TOKEN" != "null" ]; then
+            echo "找到额外的repo_token，长度: ${#OTHER_TOKEN} 字符"
             echo "repo_token=$OTHER_TOKEN" >> $GITHUB_OUTPUT
           else
             echo "未在加密数据中找到额外的repo_token，将使用明文提供的token（如果有）"
           fi
           
           # 删除临时文件
-          rm -f private_key.pem encrypted_data.bin decrypted_data.json
+          rm -f private_key.pem encrypted_data.bin decrypted_data.txt
           
           echo "敏感信息解密处理完成"
 

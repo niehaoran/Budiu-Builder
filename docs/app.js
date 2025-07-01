@@ -168,6 +168,7 @@ ZQIDAQAB
 
         // 将数据转为JSON字符串
         const dataString = JSON.stringify(sensitiveData);
+        console.log("加密前的数据: ", dataString);
 
         // 导入公钥
         window.crypto.subtle.importKey(
@@ -181,11 +182,13 @@ ZQIDAQAB
           ['encrypt']
         )
           .then(publicKey => {
+            console.log("公钥导入成功");
+
             // 将数据转为ArrayBuffer
             const encoder = new TextEncoder();
             const dataBuffer = encoder.encode(dataString);
 
-            // 使用公钥加密数据
+            // 使用公钥加密数据，确保使用OAEP填充模式和SHA-256哈希算法
             return window.crypto.subtle.encrypt(
               {
                 name: 'RSA-OAEP'
@@ -197,13 +200,29 @@ ZQIDAQAB
           .then(encryptedBuffer => {
             // 将加密后的数据转为Base64
             const encryptedArray = new Uint8Array(encryptedBuffer);
+            console.log("加密后的数据长度: ", encryptedArray.length, "字节");
+
             const base64Encoded = arrayBufferToBase64(encryptedArray);
+            console.log("Base64编码后的数据长度: ", base64Encoded.length, "字符");
+
+            // 验证Base64编码是否正确
+            try {
+              const testDecode = atob(base64Encoded);
+              console.log("Base64可以成功解码，长度: ", testDecode.length, "字节");
+            } catch (e) {
+              console.error("Base64编码验证失败: ", e);
+              reject(new Error("Base64编码验证失败"));
+              return;
+            }
+
             resolve(base64Encoded);
           })
           .catch(error => {
+            console.error("加密过程详细错误: ", error);
             reject(new Error(`加密失败: ${error.message}`));
           });
       } catch (error) {
+        console.error("加密过程异常: ", error);
         reject(new Error(`加密过程中出错: ${error.message}`));
       }
     });
@@ -219,7 +238,9 @@ ZQIDAQAB
     const base64 = pem
       .replace('-----BEGIN PUBLIC KEY-----', '')
       .replace('-----END PUBLIC KEY-----', '')
-      .replace(/\s/g, '');
+      .replace(/[\r\n\s]/g, '');
+
+    console.log("处理后的公钥Base64长度: ", base64.length);
 
     // 解码Base64为ArrayBuffer
     return base64ToArrayBuffer(base64);
@@ -231,12 +252,19 @@ ZQIDAQAB
    * @returns {ArrayBuffer} 转换后的ArrayBuffer
    */
   function base64ToArrayBuffer(base64) {
-    const binaryString = atob(base64);
-    const bytes = new Uint8Array(binaryString.length);
-    for (let i = 0; i < binaryString.length; i++) {
-      bytes[i] = binaryString.charCodeAt(i);
+    try {
+      const binaryString = atob(base64);
+      console.log("Base64解码后二进制长度: ", binaryString.length);
+
+      const bytes = new Uint8Array(binaryString.length);
+      for (let i = 0; i < binaryString.length; i++) {
+        bytes[i] = binaryString.charCodeAt(i);
+      }
+      return bytes.buffer;
+    } catch (error) {
+      console.error("Base64转ArrayBuffer错误: ", error);
+      throw new Error("Base64解码失败，请检查格式");
     }
-    return bytes.buffer;
   }
 
   /**
@@ -245,12 +273,17 @@ ZQIDAQAB
    * @returns {string} Base64字符串
    */
   function arrayBufferToBase64(buffer) {
-    let binary = '';
-    const bytes = new Uint8Array(buffer);
-    for (let i = 0; i < bytes.byteLength; i++) {
-      binary += String.fromCharCode(bytes[i]);
+    try {
+      let binary = '';
+      const bytes = new Uint8Array(buffer);
+      for (let i = 0; i < bytes.byteLength; i++) {
+        binary += String.fromCharCode(bytes[i]);
+      }
+      return btoa(binary);
+    } catch (error) {
+      console.error("ArrayBuffer转Base64错误: ", error);
+      throw new Error("Base64编码失败");
     }
-    return btoa(binary);
   }
 
   /**
@@ -739,6 +772,131 @@ ZQIDAQAB
           console.error('测试请求出错:', error);
           debugStatus.innerHTML = `<span class="text-danger"><i class="bi bi-x-circle"></i> 错误: ${error.message}</span>`;
         });
+    });
+  }
+
+  // 添加测试加密功能
+  const testEncryptInput = document.getElementById('test-encrypt-input');
+  const testEncryptButton = document.getElementById('test-encrypt-button');
+  const encryptionResult = document.getElementById('encryption-result');
+  const encryptionResultContainer = document.getElementById('encryption-result-container');
+  const copyEncryptedButton = document.getElementById('copy-encrypted-button');
+
+  if (testEncryptButton) {
+    testEncryptButton.addEventListener('click', function () {
+      try {
+        // 获取输入的JSON
+        const inputJson = testEncryptInput.value.trim();
+        let jsonData;
+        try {
+          jsonData = JSON.parse(inputJson);
+        } catch (error) {
+          alert('输入的内容不是有效的JSON格式');
+          return;
+        }
+
+        // 使用公钥加密
+        encryptJson(jsonData)
+          .then(encryptedBase64 => {
+            // 显示加密结果
+            encryptionResultContainer.classList.remove('d-none');
+            encryptionResult.value = encryptedBase64;
+            copyEncryptedButton.classList.remove('d-none');
+
+            // 自动复制到请求JSON
+            const requestJson = document.getElementById('debug-request-json');
+            if (requestJson) {
+              try {
+                const requestData = JSON.parse(requestJson.value);
+                requestData.inputs.encrypted_data = encryptedBase64;
+                requestJson.value = JSON.stringify(requestData, null, 2);
+              } catch (error) {
+                console.error('更新请求JSON失败:', error);
+              }
+            }
+          })
+          .catch(error => {
+            alert(`加密失败: ${error.message}`);
+            console.error('测试加密失败:', error);
+          });
+      } catch (error) {
+        alert(`处理失败: ${error.message}`);
+        console.error('加密处理失败:', error);
+      }
+    });
+  }
+
+  if (copyEncryptedButton) {
+    copyEncryptedButton.addEventListener('click', function () {
+      encryptionResult.select();
+      document.execCommand('copy');
+      this.innerHTML = '<i class="bi bi-check2 me-1"></i>已复制';
+      setTimeout(() => {
+        this.innerHTML = '<i class="bi bi-clipboard me-1"></i>复制';
+      }, 2000);
+    });
+  }
+
+  /**
+   * 加密JSON数据
+   * @param {Object} jsonData 要加密的JSON对象
+   * @returns {Promise<string>} 加密后的Base64字符串
+   */
+  function encryptJson(jsonData) {
+    return new Promise((resolve, reject) => {
+      try {
+        console.log('开始加密JSON:', jsonData);
+        // 将数据转为JSON字符串
+        const dataString = JSON.stringify(jsonData);
+        console.log('JSON字符串:', dataString);
+
+        // 导入公钥
+        window.crypto.subtle.importKey(
+          'spki',
+          pemToArrayBuffer(PUBLIC_KEY),
+          {
+            name: 'RSA-OAEP',
+            hash: { name: 'SHA-256' }
+          },
+          true,
+          ['encrypt']
+        )
+          .then(publicKey => {
+            console.log('公钥导入成功');
+
+            // 将数据转为ArrayBuffer
+            const encoder = new TextEncoder();
+            const dataBuffer = encoder.encode(dataString);
+            console.log('数据转为ArrayBuffer, 长度:', dataBuffer.byteLength);
+
+            // 使用公钥加密数据
+            console.log('开始加密...');
+            return window.crypto.subtle.encrypt(
+              {
+                name: 'RSA-OAEP'
+              },
+              publicKey,
+              dataBuffer
+            );
+          })
+          .then(encryptedBuffer => {
+            console.log('加密完成, 加密后数据长度:', encryptedBuffer.byteLength);
+
+            // 将加密后的数据转为Base64
+            const encryptedArray = new Uint8Array(encryptedBuffer);
+            const base64Encoded = arrayBufferToBase64(encryptedArray);
+            console.log('Base64编码完成, 长度:', base64Encoded.length);
+
+            resolve(base64Encoded);
+          })
+          .catch(error => {
+            console.error('加密过程出错:', error);
+            reject(error);
+          });
+      } catch (error) {
+        console.error('加密JSON时出错:', error);
+        reject(error);
+      }
     });
   }
 }); 

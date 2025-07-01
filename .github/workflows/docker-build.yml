@@ -63,7 +63,19 @@ jobs:
       - name: 检出代码
         uses: actions/checkout@v3
         with:
-          token: ${{ secrets.GITHUB_TOKEN }}
+          token: ${{ github.token }}
+
+      # 添加调试步骤
+      - name: 调试输入参数
+        run: |
+          echo "========== 调试输入参数 =========="
+          echo "事件名称: ${{ github.event_name }}"
+          echo "build_config: ${{ github.event.inputs.build_config }}"
+          echo "docker_config: ${{ github.event.inputs.docker_config }}"
+          echo "extra_config: ${{ github.event.inputs.extra_config }}"
+          echo "encrypted_secrets是否提供: ${{ github.event.inputs.encrypted_secrets != '' }}"
+          echo "status_callback_url是否提供: ${{ github.event.inputs.status_callback_url != '' }}"
+          echo "=============================="
 
       - name: 解密敏感信息
         if: ${{ github.event.inputs.encrypted_secrets != '' }}
@@ -72,6 +84,21 @@ jobs:
           ENCRYPTED_DATA: ${{ github.event.inputs.encrypted_secrets }}
           PRIVATE_KEY: ${{ secrets.DECRYPT_PRIVATE_KEY }}
         run: |
+          # 检查是否提供了所需的环境变量
+          if [ -z "$ENCRYPTED_DATA" ]; then
+            echo "警告: 未提供加密数据"
+            echo "has_github_token=false" >> $GITHUB_OUTPUT
+            echo "has_docker_password=false" >> $GITHUB_OUTPUT
+            exit 0
+          fi
+          
+          if [ -z "$PRIVATE_KEY" ]; then
+            echo "警告: 未提供解密私钥，请在仓库设置中添加DECRYPT_PRIVATE_KEY密钥"
+            echo "has_github_token=false" >> $GITHUB_OUTPUT
+            echo "has_docker_password=false" >> $GITHUB_OUTPUT
+            exit 0
+          fi
+          
           if [ -n "$ENCRYPTED_DATA" ] && [ -n "$PRIVATE_KEY" ]; then
             echo "开始解密敏感信息..."
             # 将私钥保存到临时文件
@@ -79,25 +106,53 @@ jobs:
             chmod 600 private_key.pem
             
             # 解码base64并解密数据
-            echo "$ENCRYPTED_DATA" | base64 -d > encrypted_data.bin
-            openssl pkeyutl -decrypt -inkey private_key.pem -in encrypted_data.bin -out decrypted_data.json
+            echo "$ENCRYPTED_DATA" | base64 -d > encrypted_data.bin || {
+              echo "错误: 无法解码base64数据"
+              echo "has_github_token=false" >> $GITHUB_OUTPUT
+              echo "has_docker_password=false" >> $GITHUB_OUTPUT
+              exit 1
+            }
+            
+            openssl pkeyutl -decrypt -inkey private_key.pem -in encrypted_data.bin -out decrypted_data.json || {
+              echo "错误: 无法解密数据，请检查私钥是否正确"
+              echo "has_github_token=false" >> $GITHUB_OUTPUT
+              echo "has_docker_password=false" >> $GITHUB_OUTPUT
+              exit 1
+            }
+            
+            # 检查解密后的文件是否为有效JSON
+            if ! jq empty decrypted_data.json 2>/dev/null; then
+              echo "错误: 解密后的数据不是有效的JSON"
+              echo "has_github_token=false" >> $GITHUB_OUTPUT
+              echo "has_docker_password=false" >> $GITHUB_OUTPUT
+              exit 1
+            fi
             
             # 读取解密后的JSON数据
             GITHUB_TOKEN=$(jq -r '.github_token' decrypted_data.json)
             DOCKER_PASSWORD=$(jq -r '.docker_password' decrypted_data.json)
             
-            # 设置输出变量，但不打印到日志
-            echo "has_github_token=true" >> $GITHUB_OUTPUT
-            echo "has_docker_password=true" >> $GITHUB_OUTPUT
+            # 检查是否成功获取值
+            if [ "$GITHUB_TOKEN" = "null" ] || [ -z "$GITHUB_TOKEN" ]; then
+              echo "警告: 未从解密数据中找到github_token"
+              echo "has_github_token=false" >> $GITHUB_OUTPUT
+            else
+              echo "has_github_token=true" >> $GITHUB_OUTPUT
+              echo "$GITHUB_TOKEN" > github_token.txt
+            fi
             
-            # 将敏感信息写入临时文件
-            echo "$GITHUB_TOKEN" > github_token.txt
-            echo "$DOCKER_PASSWORD" > docker_password.txt
+            if [ "$DOCKER_PASSWORD" = "null" ] || [ -z "$DOCKER_PASSWORD" ]; then
+              echo "警告: 未从解密数据中找到docker_password"
+              echo "has_docker_password=false" >> $GITHUB_OUTPUT
+            else
+              echo "has_docker_password=true" >> $GITHUB_OUTPUT
+              echo "$DOCKER_PASSWORD" > docker_password.txt
+            fi
             
             # 删除临时文件
-            rm private_key.pem encrypted_data.bin decrypted_data.json
+            rm -f private_key.pem encrypted_data.bin decrypted_data.json
             
-            echo "敏感信息解密完成"
+            echo "敏感信息解密处理完成"
           else
             echo "未提供加密数据或解密密钥，跳过解密步骤"
             echo "has_github_token=false" >> $GITHUB_OUTPUT
@@ -108,79 +163,160 @@ jobs:
         id: config
         run: |
           if [ "${{ github.event_name }}" == "workflow_dispatch" ]; then
+            echo "处理手动触发的工作流..."
+            
             # 解析构建配置
             BUILD_CONFIG="${{ github.event.inputs.build_config }}"
+            if [ -z "$BUILD_CONFIG" ]; then
+              echo "错误: 未提供build_config参数"
+              exit 1
+            fi
+            
+            # 使用read -r确保正确处理特殊字符
             IFS='|' read -r REPO_URL REPO_BRANCH <<< "$BUILD_CONFIG"
+            if [ -z "$REPO_URL" ] || [ -z "$REPO_BRANCH" ]; then
+              echo "错误: build_config格式不正确，应为'repo_url|repo_branch'"
+              echo "收到的值: $BUILD_CONFIG"
+              exit 1
+            fi
+            
+            echo "仓库URL: $REPO_URL"
+            echo "仓库分支: $REPO_BRANCH"
             echo "repo_url=$REPO_URL" >> $GITHUB_OUTPUT
             echo "repo_branch=$REPO_BRANCH" >> $GITHUB_OUTPUT
             
             # 处理GitHub令牌
             if [ "${{ steps.decrypt.outputs.has_github_token }}" == "true" ]; then
               # 使用解密的GitHub令牌
+              echo "使用解密的GitHub令牌"
               REPO_TOKEN=$(cat github_token.txt)
               rm -f github_token.txt
             else
               # 尝试从仓库密钥获取
+              echo "尝试从仓库密钥获取GitHub令牌"
               SECRETS_CONFIG="${{ github.event.inputs.use_secrets }}"
               IFS='|' read -r GITHUB_TOKEN_NAME DOCKER_PASSWORD_NAME <<< "$SECRETS_CONFIG"
               
               if [ -n "$GITHUB_TOKEN_NAME" ]; then
+                echo "使用密钥名称: $GITHUB_TOKEN_NAME"
                 # 使用间接引用获取密钥值
                 eval "REPO_TOKEN=\${{ secrets.$GITHUB_TOKEN_NAME }}"
               else
+                echo "未提供GitHub令牌"
                 REPO_TOKEN=""
               fi
             fi
+            
+            # 检查令牌是否为空
+            if [ -z "$REPO_TOKEN" ]; then
+              echo "警告: 未提供GitHub令牌，将以公共方式克隆仓库"
+            else
+              echo "GitHub令牌已提供"
+            fi
+            
             echo "repo_token=$REPO_TOKEN" >> $GITHUB_OUTPUT
             
             # 解析Docker配置
             DOCKER_CONFIG="${{ github.event.inputs.docker_config }}"
+            if [ -z "$DOCKER_CONFIG" ]; then
+              echo "错误: 未提供docker_config参数"
+              exit 1
+            fi
+            
             IFS='|' read -r DOCKER_REGISTRY DOCKER_USERNAME IMAGE_FULL_NAME PLATFORMS <<< "$DOCKER_CONFIG"
+            if [ -z "$DOCKER_REGISTRY" ] || [ -z "$DOCKER_USERNAME" ] || [ -z "$IMAGE_FULL_NAME" ] || [ -z "$PLATFORMS" ]; then
+              echo "错误: docker_config格式不正确，应为'registry|username|image_full_name|platforms'"
+              echo "收到的值: $DOCKER_CONFIG"
+              exit 1
+            fi
+            
+            echo "Docker注册表: $DOCKER_REGISTRY"
+            echo "Docker用户名: $DOCKER_USERNAME"
+            echo "镜像全名: $IMAGE_FULL_NAME"
+            echo "平台: $PLATFORMS"
+            
             echo "docker_registry=$DOCKER_REGISTRY" >> $GITHUB_OUTPUT
             echo "docker_username=$DOCKER_USERNAME" >> $GITHUB_OUTPUT
             
             # 处理Docker密码
             if [ "${{ steps.decrypt.outputs.has_docker_password }}" == "true" ]; then
               # 使用解密的Docker密码
+              echo "使用解密的Docker密码"
               DOCKER_PASSWORD=$(cat docker_password.txt)
               rm -f docker_password.txt
             else
               # 尝试从仓库密钥获取
+              echo "尝试从仓库密钥获取Docker密码"
               SECRETS_CONFIG="${{ github.event.inputs.use_secrets }}"
               IFS='|' read -r GITHUB_TOKEN_NAME DOCKER_PASSWORD_NAME <<< "$SECRETS_CONFIG"
               
               if [ -n "$DOCKER_PASSWORD_NAME" ]; then
+                echo "使用密钥名称: $DOCKER_PASSWORD_NAME"
                 # 使用间接引用获取密钥值
                 eval "DOCKER_PASSWORD=\${{ secrets.$DOCKER_PASSWORD_NAME }}"
               else
+                echo "未从secrets中指定Docker密码"
                 DOCKER_PASSWORD=""
               fi
             fi
+            
+            # 检查密码是否为空
+            if [ -z "$DOCKER_PASSWORD" ]; then
+              echo "错误: 未提供Docker密码，无法登录Docker仓库"
+              exit 1
+            else
+              echo "Docker密码已提供"
+            fi
+            
             echo "docker_password=$DOCKER_PASSWORD" >> $GITHUB_OUTPUT
             
             # 解析镜像名称和标签
             IMAGE_NAME=$(echo $IMAGE_FULL_NAME | cut -d':' -f1)
             IMAGE_TAG=$(echo $IMAGE_FULL_NAME | cut -d':' -f2)
             if [ "$IMAGE_TAG" == "$IMAGE_NAME" ]; then
+              echo "未指定镜像标签，使用默认值'latest'"
               IMAGE_TAG="latest"
             fi
+            
+            echo "镜像名称: $IMAGE_NAME"
+            echo "镜像标签: $IMAGE_TAG"
+            
             echo "image_name=$IMAGE_NAME" >> $GITHUB_OUTPUT
             echo "image_tag=$IMAGE_TAG" >> $GITHUB_OUTPUT
             echo "platforms=$PLATFORMS" >> $GITHUB_OUTPUT
             
             # 解析额外配置
             EXTRA_CONFIG="${{ github.event.inputs.extra_config }}"
+            if [ -z "$EXTRA_CONFIG" ]; then
+              echo "错误: 未提供extra_config参数"
+              exit 1
+            fi
+            
             IFS='|' read -r DOCKERFILE_PATH USER_FILES_BASE64 <<< "$EXTRA_CONFIG"
+            if [ -z "$DOCKERFILE_PATH" ]; then
+              echo "错误: 未指定Dockerfile路径"
+              exit 1
+            fi
+            
+            echo "Dockerfile路径: $DOCKERFILE_PATH"
             echo "dockerfile_path=$DOCKERFILE_PATH" >> $GITHUB_OUTPUT
             
             # 解码用户文件配置（如果有）
             if [ -n "$USER_FILES_BASE64" ]; then
-              echo "$USER_FILES_BASE64" | base64 -d > user_files.json
-              echo "已解码用户文件配置"
+              echo "处理用户文件配置..."
+              echo "$USER_FILES_BASE64" | base64 -d > user_files.json || {
+                echo "警告: 无法解码user_files_base64，跳过用户文件处理"
+              }
+              
+              if [ -f "user_files.json" ]; then
+                echo "已解码用户文件配置"
+              fi
+            else
+              echo "未提供用户文件配置"
             fi
           else
             # 从推送事件获取默认配置
-            echo "使用默认构建配置"
+            echo "使用默认构建配置（推送事件触发）"
             # 设置默认值
             echo "repo_url=$GITHUB_SERVER_URL/$GITHUB_REPOSITORY" >> $GITHUB_OUTPUT
             echo "repo_branch=$GITHUB_REF_NAME" >> $GITHUB_OUTPUT
@@ -391,6 +527,24 @@ jobs:
           username: ${{ needs.prepare.outputs.docker_username }}
           password: ${{ needs.prepare.outputs.docker_password }}
 
+      - name: 验证Docker凭据
+        run: |
+          echo "尝试验证Docker凭据..."
+          echo "使用的Docker Registry: ${{ needs.prepare.outputs.docker_registry }}"
+          echo "使用的Docker用户名: ${{ needs.prepare.outputs.docker_username }}"
+          
+          # 使用Docker CLI验证登录是否成功
+          docker system info || {
+            echo "错误: Docker服务不可用"
+            exit 1
+          }
+          
+          # 检查是否可以访问指定的仓库
+          docker pull hello-world || {
+            echo "警告: 无法拉取测试镜像，这可能表明Docker登录存在问题"
+            echo "尝试检查Docker凭据是否正确"
+          }
+
       - name: 更新构建状态-构建开始
         if: ${{ github.event.inputs.status_callback_url != '' }}
         run: |
@@ -404,7 +558,7 @@ jobs:
               "step": "构建镜像",
               "message": "开始构建Docker镜像",
               "timestamp": "'$(date -u +"%Y-%m-%dT%H:%M:%SZ")'"
-            }'
+            }' || echo "警告: 无法发送状态更新"
 
       - name: 构建并推送Docker镜像 (${{ matrix.platform }})
         uses: docker/build-push-action@v4

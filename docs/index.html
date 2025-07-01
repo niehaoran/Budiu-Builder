@@ -59,8 +59,8 @@
 
                 <div class="form-group mb-3">
                   <label for="github-token" class="form-label">GitHub Token (用于自动授权)</label>
-                  <input type="password" id="github-token" class="form-control" placeholder="输入GitHub个人访问令牌">
-                  <div class="form-text">提供GitHub个人访问令牌可避免需要手动批准构建</div>
+                  <input type="password" id="github-token" class="form-control" placeholder="输入GitHub个人访问令牌" required>
+                  <div class="form-text">提供GitHub个人访问令牌以触发GitHub Actions构建</div>
                 </div>
               </div>
             </div>
@@ -124,12 +124,13 @@
                 <div class="form-group mb-3">
                   <label for="image-name" class="form-label">镜像名称</label>
                   <input type="text" id="image-name" class="form-control" required>
-                  <div class="form-text">不需要包含仓库地址，例如：myapp</div>
+                  <div class="form-text">镜像名称部分，如 myapp</div>
                 </div>
 
                 <div class="form-group mb-3">
                   <label for="image-tag" class="form-label">镜像标签</label>
                   <input type="text" id="image-tag" class="form-control" value="latest" required>
+                  <div class="form-text">最终镜像格式: docker.io/username/name:tag</div>
                 </div>
 
                 <div class="form-group mb-3">
@@ -191,7 +192,7 @@
           <li><strong>提供Docker仓库信息</strong> - 输入您要推送镜像的Docker仓库凭据</li>
           <li><strong>设置镜像名称和标签</strong> - 为构建的Docker镜像命名</li>
           <li><strong>选择目标平台</strong> - 选择需要构建的硬件架构平台(x86_64, ARM等)</li>
-          <li><strong>提供GitHub Token</strong> - 输入GitHub个人访问令牌以实现自动构建，无需等待批准</li>
+          <li><strong>提供GitHub Token</strong> - 输入GitHub个人访问令牌以实现自动构建</li>
           <li><strong>触发构建</strong> - 点击"触发构建"按钮启动GitHub Actions工作流</li>
         </ol>
         <div class="alert alert-warning">
@@ -218,7 +219,7 @@
         <!-- 构建日志查看组件 -->
         <div id="build-logs-container" class="d-none">
           <div class="d-flex justify-content-between align-items-center mb-2">
-            <h5 class="mb-0"><i class="bi bi-terminal-fill me-2"></i>实时构建日志</h5>
+            <h5 class="mb-0"><i class="bi bi-terminal-fill me-2"></i>构建日志模拟</h5>
             <div>
               <button id="refresh-logs" class="btn btn-sm btn-outline-secondary">
                 <i class="bi bi-arrow-clockwise"></i> 刷新
@@ -250,35 +251,6 @@
     </div>
 
     <div class="card shadow mb-4">
-      <div class="card-header bg-dark text-white">
-        <h2 class="h5 mb-0"><i class="bi bi-shield-check me-2"></i>安全特性</h2>
-      </div>
-      <div class="card-body">
-        <div class="row">
-          <div class="col-md-6">
-            <div class="d-flex align-items-center mb-3">
-              <div class="me-3 fs-3 text-success"><i class="bi bi-search"></i></div>
-              <div>
-                <h5 class="mb-1">镜像漏洞扫描</h5>
-                <p class="mb-0 small text-muted">自动扫描构建的镜像中的安全漏洞</p>
-              </div>
-            </div>
-          </div>
-          <div class="col-md-6">
-            <div class="d-flex align-items-center mb-3">
-              <div class="me-3 fs-3 text-success"><i class="bi bi-layers"></i></div>
-              <div>
-                <h5 class="mb-1">多架构支持</h5>
-                <p class="mb-0 small text-muted">同时构建x86和ARM架构镜像</p>
-              </div>
-            </div>
-          </div>
-        </div>
-      </div>
-    </div>
-
-    <!-- 添加调试工具区域 -->
-    <div class="card shadow mb-4">
       <div class="card-header bg-warning text-white d-flex justify-content-between align-items-center">
         <h2 class="h5 mb-0"><i class="bi bi-bug-fill me-2"></i>调试工具</h2>
         <button class="btn btn-sm btn-outline-light" type="button" data-bs-toggle="collapse"
@@ -287,7 +259,7 @@
         </button>
       </div>
       <div id="debug-tools" class="card-body collapse">
-        <h5>手动构建测试</h5>
+        <h5>手动API测试</h5>
         <div class="mb-3">
           <label for="debug-github-token" class="form-label">GitHub Token</label>
           <input type="password" id="debug-github-token" class="form-control">
@@ -295,14 +267,20 @@
 
         <div class="mb-3">
           <label for="debug-request-json" class="form-label">请求参数 (JSON)</label>
-          <textarea id="debug-request-json" class="form-control" rows="8">
+          <textarea id="debug-request-json" class="form-control" rows="10">
 {
   "ref": "main",
   "inputs": {
-    "build_config": "https://github.com/whyour/qinglong|develop",
-    "docker_config": "docker.io|niehaoran|niehaoran/qinglong:latest|linux/amd64",
-    "extra_config": "docker/Dockerfile|",
-    "status_callback_url": "https://your-backend-api.com/api/build-status"
+    "repository": "https://github.com/whyour/qinglong",
+    "branch": "develop",
+    "dockerfile": "docker/Dockerfile",
+    "image_name": "docker.io/niehaoran/qinglong:latest",
+    "platforms": "linux/amd64",
+    "registry": "docker.io",
+    "docker_username": "niehaoran",
+    "docker_password": "your_password_here",
+    "repo_token": "",
+    "callback_url": ""
   }
 }
           </textarea>
@@ -314,6 +292,43 @@
             <i class="bi bi-send-fill me-2"></i>发送测试请求
           </button>
           <div id="debug-status" class="ms-3 align-self-center"></div>
+        </div>
+      </div>
+    </div>
+
+    <div class="card shadow mb-4">
+      <div class="card-header bg-dark text-white">
+        <h2 class="h5 mb-0"><i class="bi bi-shield-check me-2"></i>安全特性</h2>
+      </div>
+      <div class="card-body">
+        <div class="row">
+          <div class="col-md-4">
+            <div class="d-flex align-items-center mb-3">
+              <div class="me-3 fs-3 text-success"><i class="bi bi-search"></i></div>
+              <div>
+                <h5 class="mb-1">镜像漏洞扫描</h5>
+                <p class="mb-0 small text-muted">自动扫描构建的镜像中的安全漏洞</p>
+              </div>
+            </div>
+          </div>
+          <div class="col-md-4">
+            <div class="d-flex align-items-center mb-3">
+              <div class="me-3 fs-3 text-success"><i class="bi bi-layers"></i></div>
+              <div>
+                <h5 class="mb-1">多架构支持</h5>
+                <p class="mb-0 small text-muted">同时构建x86和ARM架构镜像</p>
+              </div>
+            </div>
+          </div>
+          <div class="col-md-4">
+            <div class="d-flex align-items-center mb-3">
+              <div class="me-3 fs-3 text-success"><i class="bi bi-lock"></i></div>
+              <div>
+                <h5 class="mb-1">安全凭证管理</h5>
+                <p class="mb-0 small text-muted">直接传输敏感信息，避免中间存储</p>
+              </div>
+            </div>
+          </div>
         </div>
       </div>
     </div>
@@ -338,7 +353,7 @@
           </ul>
         </div>
         <div class="col-md-4 text-md-end">
-          <p class="mb-1 small">版本 <span class="badge bg-primary">v1.0.0</span></p>
+          <p class="mb-1 small">版本 <span class="badge bg-primary">v2.0.0</span></p>
           <p class="small text-muted mb-0">© 2023 Budiu Builder. MIT License.</p>
         </div>
       </div>

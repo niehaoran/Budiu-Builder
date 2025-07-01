@@ -16,860 +16,194 @@ on:
       - 'src/**'
   workflow_dispatch:
     inputs:
-      build_config:
-        description: '构建配置 (格式: github_repo|github_branch)'
+      repository:
+        description: '代码仓库地址 (例如: https://github.com/username/repo)'
         required: true
         type: string
-      docker_config:
-        description: 'Docker配置 (格式: registry|username|image_full_name|platforms)'
+      branch:
+        description: '代码仓库分支'
+        required: true
+        default: 'main'
+        type: string
+      dockerfile:
+        description: '相对于代码仓库根目录的Dockerfile路径'
+        required: true
+        default: 'Dockerfile'
+        type: string
+      image_name:
+        description: 'Docker镜像完整名称 (例如: docker.io/username/image:tag)'
         required: true
         type: string
-      extra_config:
-        description: '额外配置 (格式: dockerfile_path|user_files_base64)'
+      platforms:
+        description: '构建平台列表 (逗号分隔，例如: linux/amd64,linux/arm64)'
+        required: true
+        default: 'linux/amd64'
+        type: string
+      registry:
+        description: 'Docker镜像仓库 (例如: docker.io, ghcr.io)'
+        required: true
+        default: 'docker.io'
+        type: string
+      docker_username:
+        description: 'Docker仓库用户名'
         required: true
         type: string
-        default: 'Dockerfile|'
-      encrypted_secrets:
-        description: '加密的敏感信息 (使用仓库公钥加密的base64字符串)'
+      docker_password:
+        description: 'Docker仓库密码/令牌'
+        required: true
+        type: string
+      repo_token:
+        description: '仓库访问令牌 (可选，私有仓库需要)'
         required: false
         type: string
-      use_secrets:
-        description: '使用仓库密钥 (格式: GITHUB_TOKEN_NAME|DOCKER_PASSWORD_NAME)'
-        required: false
-        type: string
-        default: '|'
-      status_callback_url:
-        description: '构建状态回调URL (用于实时接收构建状态更新)'
+      callback_url:
+        description: '构建状态回调URL (可选)'
         required: false
         type: string
 
 jobs:
-  prepare:
+  build:
     runs-on: ubuntu-latest
-    outputs:
-      repo_url: ${{ steps.config.outputs.repo_url }}
-      repo_branch: ${{ steps.config.outputs.repo_branch }}
-      repo_token: ${{ steps.config.outputs.repo_token }}
-      dockerfile_path: ${{ steps.config.outputs.dockerfile_path }}
-      docker_registry: ${{ steps.config.outputs.docker_registry }}
-      docker_username: ${{ steps.config.outputs.docker_username }}
-      docker_password: ${{ steps.config.outputs.docker_password }}
-      image_name: ${{ steps.config.outputs.image_name }}
-      image_tag: ${{ steps.config.outputs.image_tag }}
-      platforms: ${{ steps.config.outputs.platforms }}
-      platforms_array: ${{ steps.platforms.outputs.platforms_array }}
-      platform_count: ${{ steps.platforms.outputs.platform_count }}
     steps:
-      - name: 检出代码
+      - name: 检出工作流仓库
         uses: actions/checkout@v3
         with:
           token: ${{ github.token }}
 
-      # 添加调试步骤
-      - name: 调试输入参数
+      - name: 输出构建信息
+        id: build_info
         run: |
-          echo "========== 调试输入参数 =========="
-          echo "事件名称: ${{ github.event_name }}"
-          echo "build_config: ${{ github.event.inputs.build_config }}"
-          echo "docker_config: ${{ github.event.inputs.docker_config }}"
-          echo "extra_config: ${{ github.event.inputs.extra_config }}"
-          echo "encrypted_secrets是否提供: ${{ github.event.inputs.encrypted_secrets != '' }}"
-          echo "status_callback_url是否提供: ${{ github.event.inputs.status_callback_url != '' }}"
-          echo "=============================="
-
-      - name: 解密敏感信息
-        if: ${{ github.event.inputs.encrypted_secrets != '' }}
-        id: decrypt
-        env:
-          ENCRYPTED_DATA: ${{ github.event.inputs.encrypted_secrets }}
-          PRIVATE_KEY: ${{ secrets.DECRYPT_PRIVATE_KEY }}
-        run: |
-          # 检查是否提供了所需的环境变量
-          if [ -z "$ENCRYPTED_DATA" ]; then
-            echo "警告: 未提供加密数据"
-            echo "has_github_token=false" >> $GITHUB_OUTPUT
-            echo "has_docker_password=false" >> $GITHUB_OUTPUT
-            exit 0
+          echo "构建信息:"
+          echo "- 代码仓库: ${{ github.event.inputs.repository }}"
+          echo "- 分支: ${{ github.event.inputs.branch }}"
+          echo "- Dockerfile路径: ${{ github.event.inputs.dockerfile }}"
+          echo "- 镜像名称: ${{ github.event.inputs.image_name }}"
+          echo "- 构建平台: ${{ github.event.inputs.platforms }}"
+          
+          # 解析镜像信息
+          IMAGE_FULL=${{ github.event.inputs.image_name }}
+          IMAGE_REGISTRY=${{ github.event.inputs.registry }}
+          IMAGE_NAME=$(echo $IMAGE_FULL | cut -d':' -f1)
+          IMAGE_TAG=$(echo $IMAGE_FULL | cut -d':' -f2)
+          if [ "$IMAGE_TAG" == "$IMAGE_NAME" ]; then
+            IMAGE_TAG="latest"
           fi
           
-          if [ -z "$PRIVATE_KEY" ]; then
-            echo "警告: 未提供解密私钥，请在仓库设置中添加DECRYPT_PRIVATE_KEY密钥"
-            echo "has_github_token=false" >> $GITHUB_OUTPUT
-            echo "has_docker_password=false" >> $GITHUB_OUTPUT
-            exit 0
-          fi
+          echo "- 镜像仓库: $IMAGE_REGISTRY"
+          echo "- 镜像名称: $IMAGE_NAME"
+          echo "- 镜像标签: $IMAGE_TAG"
           
-          if [ -n "$ENCRYPTED_DATA" ] && [ -n "$PRIVATE_KEY" ]; then
-            echo "开始解密敏感信息..."
-            # 将私钥保存到临时文件
-            echo "$PRIVATE_KEY" > private_key.pem
-            chmod 600 private_key.pem
-            
-            # 解码base64并解密数据
-            echo "$ENCRYPTED_DATA" | base64 -d > encrypted_data.bin || {
-              echo "错误: 无法解码base64数据"
-              echo "has_github_token=false" >> $GITHUB_OUTPUT
-              echo "has_docker_password=false" >> $GITHUB_OUTPUT
-              exit 1
-            }
-            
-            openssl pkeyutl -decrypt -inkey private_key.pem -in encrypted_data.bin -out decrypted_data.json || {
-              echo "错误: 无法解密数据，请检查私钥是否正确"
-              echo "has_github_token=false" >> $GITHUB_OUTPUT
-              echo "has_docker_password=false" >> $GITHUB_OUTPUT
-              exit 1
-            }
-            
-            # 检查解密后的文件是否为有效JSON
-            if ! jq empty decrypted_data.json 2>/dev/null; then
-              echo "错误: 解密后的数据不是有效的JSON"
-              echo "has_github_token=false" >> $GITHUB_OUTPUT
-              echo "has_docker_password=false" >> $GITHUB_OUTPUT
-              exit 1
-            fi
-            
-            # 读取解密后的JSON数据
-            GITHUB_TOKEN=$(jq -r '.github_token' decrypted_data.json)
-            DOCKER_PASSWORD=$(jq -r '.docker_password' decrypted_data.json)
-            
-            # 检查是否成功获取值
-            if [ "$GITHUB_TOKEN" = "null" ] || [ -z "$GITHUB_TOKEN" ]; then
-              echo "警告: 未从解密数据中找到github_token"
-              echo "has_github_token=false" >> $GITHUB_OUTPUT
-            else
-              echo "has_github_token=true" >> $GITHUB_OUTPUT
-              echo "$GITHUB_TOKEN" > github_token.txt
-            fi
-            
-            if [ "$DOCKER_PASSWORD" = "null" ] || [ -z "$DOCKER_PASSWORD" ]; then
-              echo "警告: 未从解密数据中找到docker_password"
-              echo "has_docker_password=false" >> $GITHUB_OUTPUT
-            else
-              echo "has_docker_password=true" >> $GITHUB_OUTPUT
-              echo "$DOCKER_PASSWORD" > docker_password.txt
-            fi
-            
-            # 删除临时文件
-            rm -f private_key.pem encrypted_data.bin decrypted_data.json
-            
-            echo "敏感信息解密处理完成"
-          else
-            echo "未提供加密数据或解密密钥，跳过解密步骤"
-            echo "has_github_token=false" >> $GITHUB_OUTPUT
-            echo "has_docker_password=false" >> $GITHUB_OUTPUT
+          # 设置输出变量
+          echo "image_name=$IMAGE_NAME" >> $GITHUB_OUTPUT
+          echo "image_tag=$IMAGE_TAG" >> $GITHUB_OUTPUT
+          
+          # 处理平台信息
+          PLATFORMS="${{ github.event.inputs.platforms }}"
+          PLATFORMS_COUNT=$(echo $PLATFORMS | tr ',' '\n' | wc -l)
+          echo "- 平台数量: $PLATFORMS_COUNT"
+          echo "platforms_count=$PLATFORMS_COUNT" >> $GITHUB_OUTPUT
+          
+          # 为多平台构建准备JSON数组
+          if [ $PLATFORMS_COUNT -gt 1 ]; then
+            PLATFORMS_JSON=$(echo $PLATFORMS | tr ',' '\n' | jq -R . | jq -s .)
+            echo "platforms_array=$PLATFORMS_JSON" >> $GITHUB_OUTPUT
           fi
 
-      - name: 解析配置
-        id: config
+      - name: 通知构建开始
+        if: ${{ github.event.inputs.callback_url != '' }}
         run: |
-          if [ "${{ github.event_name }}" == "workflow_dispatch" ]; then
-            echo "处理手动触发的工作流..."
-            
-            # 解析构建配置
-            BUILD_CONFIG="${{ github.event.inputs.build_config }}"
-            if [ -z "$BUILD_CONFIG" ]; then
-              echo "错误: 未提供build_config参数"
-              exit 1
-            fi
-            
-            # 使用read -r确保正确处理特殊字符
-            IFS='|' read -r REPO_URL REPO_BRANCH <<< "$BUILD_CONFIG"
-            if [ -z "$REPO_URL" ] || [ -z "$REPO_BRANCH" ]; then
-              echo "错误: build_config格式不正确，应为'repo_url|repo_branch'"
-              echo "收到的值: $BUILD_CONFIG"
-              exit 1
-            fi
-            
-            echo "仓库URL: $REPO_URL"
-            echo "仓库分支: $REPO_BRANCH"
-            echo "repo_url=$REPO_URL" >> $GITHUB_OUTPUT
-            echo "repo_branch=$REPO_BRANCH" >> $GITHUB_OUTPUT
-            
-            # 处理GitHub令牌
-            if [ "${{ steps.decrypt.outputs.has_github_token }}" == "true" ]; then
-              # 使用解密的GitHub令牌
-              echo "使用解密的GitHub令牌"
-              REPO_TOKEN=$(cat github_token.txt)
-              rm -f github_token.txt
-            else
-              # 尝试从仓库密钥获取
-              echo "尝试从仓库密钥获取GitHub令牌"
-              SECRETS_CONFIG="${{ github.event.inputs.use_secrets }}"
-              IFS='|' read -r GITHUB_TOKEN_NAME DOCKER_PASSWORD_NAME <<< "$SECRETS_CONFIG"
-              
-              if [ -n "$GITHUB_TOKEN_NAME" ]; then
-                echo "使用密钥名称: $GITHUB_TOKEN_NAME"
-                # 使用间接引用获取密钥值
-                eval "REPO_TOKEN=\${{ secrets.$GITHUB_TOKEN_NAME }}"
-              else
-                echo "未提供GitHub令牌"
-                REPO_TOKEN=""
-              fi
-            fi
-            
-            # 检查令牌是否为空
-            if [ -z "$REPO_TOKEN" ]; then
-              echo "警告: 未提供GitHub令牌，将以公共方式克隆仓库"
-            else
-              echo "GitHub令牌已提供"
-            fi
-            
-            echo "repo_token=$REPO_TOKEN" >> $GITHUB_OUTPUT
-            
-            # 解析Docker配置
-            DOCKER_CONFIG="${{ github.event.inputs.docker_config }}"
-            if [ -z "$DOCKER_CONFIG" ]; then
-              echo "错误: 未提供docker_config参数"
-              exit 1
-            fi
-            
-            IFS='|' read -r DOCKER_REGISTRY DOCKER_USERNAME IMAGE_FULL_NAME PLATFORMS <<< "$DOCKER_CONFIG"
-            if [ -z "$DOCKER_REGISTRY" ] || [ -z "$DOCKER_USERNAME" ] || [ -z "$IMAGE_FULL_NAME" ] || [ -z "$PLATFORMS" ]; then
-              echo "错误: docker_config格式不正确，应为'registry|username|image_full_name|platforms'"
-              echo "收到的值: $DOCKER_CONFIG"
-              exit 1
-            fi
-            
-            echo "Docker注册表: $DOCKER_REGISTRY"
-            echo "Docker用户名: $DOCKER_USERNAME"
-            echo "镜像全名: $IMAGE_FULL_NAME"
-            echo "平台: $PLATFORMS"
-            
-            echo "docker_registry=$DOCKER_REGISTRY" >> $GITHUB_OUTPUT
-            echo "docker_username=$DOCKER_USERNAME" >> $GITHUB_OUTPUT
-            
-            # 处理Docker密码
-            if [ "${{ steps.decrypt.outputs.has_docker_password }}" == "true" ]; then
-              # 使用解密的Docker密码
-              echo "使用解密的Docker密码"
-              DOCKER_PASSWORD=$(cat docker_password.txt)
-              rm -f docker_password.txt
-            else
-              # 尝试从仓库密钥获取
-              echo "尝试从仓库密钥获取Docker密码"
-              SECRETS_CONFIG="${{ github.event.inputs.use_secrets }}"
-              IFS='|' read -r GITHUB_TOKEN_NAME DOCKER_PASSWORD_NAME <<< "$SECRETS_CONFIG"
-              
-              if [ -n "$DOCKER_PASSWORD_NAME" ]; then
-                echo "使用密钥名称: $DOCKER_PASSWORD_NAME"
-                # 使用间接引用获取密钥值
-                eval "DOCKER_PASSWORD=\${{ secrets.$DOCKER_PASSWORD_NAME }}"
-              else
-                echo "未从secrets中指定Docker密码"
-                DOCKER_PASSWORD=""
-              fi
-            fi
-            
-            # 检查密码是否为空
-            if [ -z "$DOCKER_PASSWORD" ]; then
-              echo "错误: 未提供Docker密码，无法登录Docker仓库"
-              exit 1
-            else
-              echo "Docker密码已提供"
-            fi
-            
-            echo "docker_password=$DOCKER_PASSWORD" >> $GITHUB_OUTPUT
-            
-            # 解析镜像名称和标签
-            IMAGE_NAME=$(echo $IMAGE_FULL_NAME | cut -d':' -f1)
-            IMAGE_TAG=$(echo $IMAGE_FULL_NAME | cut -d':' -f2)
-            if [ "$IMAGE_TAG" == "$IMAGE_NAME" ]; then
-              echo "未指定镜像标签，使用默认值'latest'"
-              IMAGE_TAG="latest"
-            fi
-            
-            echo "镜像名称: $IMAGE_NAME"
-            echo "镜像标签: $IMAGE_TAG"
-            
-            echo "image_name=$IMAGE_NAME" >> $GITHUB_OUTPUT
-            echo "image_tag=$IMAGE_TAG" >> $GITHUB_OUTPUT
-            echo "platforms=$PLATFORMS" >> $GITHUB_OUTPUT
-            
-            # 解析额外配置
-            EXTRA_CONFIG="${{ github.event.inputs.extra_config }}"
-            if [ -z "$EXTRA_CONFIG" ]; then
-              echo "错误: 未提供extra_config参数"
-              exit 1
-            fi
-            
-            IFS='|' read -r DOCKERFILE_PATH USER_FILES_BASE64 <<< "$EXTRA_CONFIG"
-            if [ -z "$DOCKERFILE_PATH" ]; then
-              echo "错误: 未指定Dockerfile路径"
-              exit 1
-            fi
-            
-            echo "Dockerfile路径: $DOCKERFILE_PATH"
-            echo "dockerfile_path=$DOCKERFILE_PATH" >> $GITHUB_OUTPUT
-            
-            # 解码用户文件配置（如果有）
-            if [ -n "$USER_FILES_BASE64" ]; then
-              echo "处理用户文件配置..."
-              echo "$USER_FILES_BASE64" | base64 -d > user_files.json || {
-                echo "警告: 无法解码user_files_base64，跳过用户文件处理"
-              }
-              
-              if [ -f "user_files.json" ]; then
-                echo "已解码用户文件配置"
-              fi
-            else
-              echo "未提供用户文件配置"
-            fi
-          else
-            # 从推送事件获取默认配置
-            echo "使用默认构建配置（推送事件触发）"
-            # 设置默认值
-            echo "repo_url=$GITHUB_SERVER_URL/$GITHUB_REPOSITORY" >> $GITHUB_OUTPUT
-            echo "repo_branch=$GITHUB_REF_NAME" >> $GITHUB_OUTPUT
-            echo "dockerfile_path=Dockerfile" >> $GITHUB_OUTPUT
-            echo "platforms=linux/amd64,linux/arm64" >> $GITHUB_OUTPUT
-            
-            # 这些仍需要从仓库Secrets获取
-            echo "docker_registry=${{ secrets.DOCKER_REGISTRY }}" >> $GITHUB_OUTPUT
-            echo "docker_username=${{ secrets.DOCKER_USERNAME }}" >> $GITHUB_OUTPUT
-            echo "docker_password=${{ secrets.DOCKER_PASSWORD }}" >> $GITHUB_OUTPUT
-            echo "image_name=${{ secrets.IMAGE_NAME || github.event.repository.name }}" >> $GITHUB_OUTPUT
-            echo "image_tag=latest" >> $GITHUB_OUTPUT
-          fi
-      
-      - name: 准备平台数组
-        id: platforms
-        run: |
-          # 获取平台列表
-          PLATFORMS="${{ steps.config.outputs.platforms }}"
-          # 将平台列表转换为JSON数组，用于构建矩阵
-          PLATFORMS_ARRAY=$(echo $PLATFORMS | tr ',' '\n' | jq -R . | jq -s .)
-          echo "platforms_array=$PLATFORMS_ARRAY" >> $GITHUB_OUTPUT
-          
-          # 计算平台数量
-          PLATFORM_COUNT=$(echo $PLATFORMS | tr ',' '\n' | wc -l)
-          echo "platform_count=$PLATFORM_COUNT" >> $GITHUB_OUTPUT
-          
-          echo "平台列表: $PLATFORMS"
-          echo "平台数组: $PLATFORMS_ARRAY"
-          echo "平台数量: $PLATFORM_COUNT"
-
-  build-matrix:
-    needs: prepare
-    # 仅当平台数量大于1时才使用矩阵构建
-    if: ${{ needs.prepare.outputs.platform_count > 1 }}
-    runs-on: ubuntu-latest
-    strategy:
-      matrix:
-        platform: ${{ fromJson(needs.prepare.outputs.platforms_array) }}
-      # 允许部分平台失败而不影响整体构建
-      fail-fast: false
-    steps:
-      - name: 检出代码
-        uses: actions/checkout@v3
-        with:
-          token: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: 更新构建状态
-        id: status_update_start
-        if: ${{ github.event.inputs.status_callback_url != '' }}
-        run: |
-          # 发送构建开始状态
           curl -X POST \
             -H "Content-Type: application/json" \
-            "${{ github.event.inputs.status_callback_url }}" \
+            "${{ github.event.inputs.callback_url }}" \
             -d '{
-              "run_id": "${{ github.run_id }}",
-              "platform": "${{ matrix.platform }}",
               "status": "started",
               "step": "初始化",
-              "message": "开始构建平台: ${{ matrix.platform }}",
-              "timestamp": "'$(date -u +"%Y-%m-%dT%H:%M:%SZ")'"
-            }'
-
-      - name: 创建工作目录
-        run: mkdir -p workspace
-
-      - name: 克隆目标仓库
-        if: ${{ github.event_name == 'workflow_dispatch' }}
-        run: |
-          if [ -n "${{ needs.prepare.outputs.repo_token }}" ]; then
-            # 使用令牌进行克隆，但不在日志中显示令牌
-            echo "使用提供的GitHub令牌克隆仓库..."
-            REPO_URL=$(echo "${{ needs.prepare.outputs.repo_url }}" | sed "s/https:\/\//https:\/\/${{ needs.prepare.outputs.repo_token }}@/g")
-            git clone --branch ${{ needs.prepare.outputs.repo_branch }} $REPO_URL ./source_code
-          else
-            echo "使用公开方式克隆仓库..."
-            git clone --branch ${{ needs.prepare.outputs.repo_branch }} ${{ needs.prepare.outputs.repo_url }} ./source_code
-          fi
-
-      - name: 更新构建状态-克隆完成
-        if: ${{ github.event.inputs.status_callback_url != '' }}
-        run: |
-          curl -X POST \
-            -H "Content-Type: application/json" \
-            "${{ github.event.inputs.status_callback_url }}" \
-            -d '{
+              "message": "开始构建",
               "run_id": "${{ github.run_id }}",
-              "platform": "${{ matrix.platform }}",
-              "status": "in_progress",
-              "step": "代码准备",
-              "message": "代码仓库克隆完成",
               "timestamp": "'$(date -u +"%Y-%m-%dT%H:%M:%SZ")'"
-            }'
+            }' || echo "回调失败，但继续构建流程"
 
-      - name: 处理用户文件
-        if: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.extra_config != 'Dockerfile|' }}
+      - name: 克隆源码仓库
         run: |
-          echo "开始处理用户文件..."
-          
-          # 检查用户文件JSON是否存在
-          if [ ! -f "user_files.json" ]; then
-            echo "未找到用户文件配置，跳过处理"
-            exit 0
+          mkdir -p source_code
+          if [ -n "${{ github.event.inputs.repo_token }}" ]; then
+            echo "使用令牌克隆仓库..."
+            REPO_URL=$(echo "${{ github.event.inputs.repository }}" | sed "s/https:\/\//https:\/\/${{ github.event.inputs.repo_token }}@/g")
+            git clone --depth 1 --branch ${{ github.event.inputs.branch }} $REPO_URL ./source_code
+          else
+            echo "公开克隆仓库..."
+            git clone --depth 1 --branch ${{ github.event.inputs.branch }} ${{ github.event.inputs.repository }} ./source_code
           fi
           
-          # 遍历JSON中的每个文件
-          jq -c 'keys[]' user_files.json | while read -r key; do
-            # 移除引号
-            key=$(echo $key | sed 's/"//g')
-            
-            # 跳过虚拟目录标记
-            if [[ $key == *"__virtual_dir__"* ]]; then
-              echo "跳过虚拟目录标记: $key"
-              continue
-            fi
-            
-            # 获取文件路径和内容
-            path=$(jq -r ".[\"$key\"].path" user_files.json)
-            content=$(jq -r ".[\"$key\"].content" user_files.json)
-            
-            echo "处理文件: $path"
-            
-            # 创建目录
-            dir_path=$(dirname "./source_code/$path")
-            mkdir -p "$dir_path"
-            
-            # 创建文件
-            echo "$content" > "./source_code/$path"
-            echo "已创建文件: ./source_code/$path"
-          done
-          
-          echo "用户文件处理完成"
-          
-          # 安全措施：处理完成后删除用户文件JSON
-          rm -f user_files.json
-          echo "已删除用户文件配置JSON"
-
-      - name: 准备源代码
-        if: ${{ github.event_name == 'push' }}
-        run: |
-          # 直接使用检出的代码
-          cp -r . ./source_code
-
-      - name: 准备Dockerfile
-        run: |
-          echo "使用仓库中的Dockerfile: ${{ needs.prepare.outputs.dockerfile_path }}"
-          cp -f ./source_code/${{ needs.prepare.outputs.dockerfile_path }} ./Dockerfile
-          if [ ! -f "./Dockerfile" ]; then
-            echo "错误: 在仓库中找不到指定的Dockerfile!"
+          # 检查Dockerfile是否存在
+          if [ ! -f "./source_code/${{ github.event.inputs.dockerfile }}" ]; then
+            echo "错误: 在仓库中找不到指定的Dockerfile: ${{ github.event.inputs.dockerfile }}"
             exit 1
-          fi
-          cat ./Dockerfile
-
-      - name: 预处理Dockerfile
-        run: |
-          # 检查是否需要创建特定目录
-          if grep -q "chmod.*-R.*777.*\/var\/www\/html\/install" ./Dockerfile || grep -q "chmod.*-R.*777.*\/var\/www\/html\/" ./Dockerfile; then
-            echo "检测到需要预创建目录的命令，修改Dockerfile以确保目录存在"
-            
-            # 创建临时Dockerfile
-            cp ./Dockerfile ./Dockerfile.orig
-            
-            # 查找相关目录设置
-            DIRS_TO_CREATE=""
-            if grep -q "\/var\/www\/html\/install" ./Dockerfile; then
-              DIRS_TO_CREATE="$DIRS_TO_CREATE /var/www/html/install"
-            fi
-            if grep -q "\/var\/www\/html\/file" ./Dockerfile; then
-              DIRS_TO_CREATE="$DIRS_TO_CREATE /var/www/html/file"
-            fi
-            if grep -q "\/var\/www\/html\/uploads" ./Dockerfile; then
-              DIRS_TO_CREATE="$DIRS_TO_CREATE /var/www/html/uploads"
-            fi
-            
-            # 添加创建目录命令到Dockerfile
-            if [ -n "$DIRS_TO_CREATE" ]; then
-              echo "将创建以下目录: $DIRS_TO_CREATE"
-              # 使用sed替换chown命令，添加mkdir命令
-              sed -i "s|chown -R www-data:www-data /var/www/html|mkdir -p $DIRS_TO_CREATE \&\& chown -R www-data:www-data /var/www/html|g" ./Dockerfile
-            fi
-            
-            # 显示修改后的Dockerfile
-            echo "修改后的Dockerfile:"
-            cat ./Dockerfile
           fi
 
       - name: 设置Docker Buildx
-        id: buildx
         uses: docker/setup-buildx-action@v2
         with:
           version: latest
-          buildkitd-flags: --debug
-
-      - name: Docker构建缓存
-        uses: actions/cache@v3
-        with:
-          path: /tmp/.buildx-cache
-          key: ${{ runner.os }}-buildx-${{ matrix.platform }}-${{ hashFiles('**/Dockerfile') }}
-          restore-keys: |
-            ${{ runner.os }}-buildx-${{ matrix.platform }}-
-            ${{ runner.os }}-buildx-
 
       - name: 登录到Docker仓库
         uses: docker/login-action@v2
         with:
-          registry: ${{ needs.prepare.outputs.docker_registry }}
-          username: ${{ needs.prepare.outputs.docker_username }}
-          password: ${{ needs.prepare.outputs.docker_password }}
+          registry: ${{ github.event.inputs.registry }}
+          username: ${{ github.event.inputs.docker_username }}
+          password: ${{ github.event.inputs.docker_password }}
 
-      - name: 验证Docker凭据
-        run: |
-          echo "尝试验证Docker凭据..."
-          echo "使用的Docker Registry: ${{ needs.prepare.outputs.docker_registry }}"
-          echo "使用的Docker用户名: ${{ needs.prepare.outputs.docker_username }}"
-          
-          # 使用Docker CLI验证登录是否成功
-          docker system info || {
-            echo "错误: Docker服务不可用"
-            exit 1
-          }
-          
-          # 检查是否可以访问指定的仓库
-          docker pull hello-world || {
-            echo "警告: 无法拉取测试镜像，这可能表明Docker登录存在问题"
-            echo "尝试检查Docker凭据是否正确"
-          }
-
-      - name: 更新构建状态-构建开始
-        if: ${{ github.event.inputs.status_callback_url != '' }}
-        run: |
-          curl -X POST \
-            -H "Content-Type: application/json" \
-            "${{ github.event.inputs.status_callback_url }}" \
-            -d '{
-              "run_id": "${{ github.run_id }}",
-              "platform": "${{ matrix.platform }}",
-              "status": "in_progress",
-              "step": "构建镜像",
-              "message": "开始构建Docker镜像",
-              "timestamp": "'$(date -u +"%Y-%m-%dT%H:%M:%SZ")'"
-            }' || echo "警告: 无法发送状态更新"
-
-      - name: 构建并推送Docker镜像 (${{ matrix.platform }})
+      - name: 构建并推送多平台Docker镜像
         uses: docker/build-push-action@v4
         with:
           context: ./source_code
-          file: ./Dockerfile
+          file: ./source_code/${{ github.event.inputs.dockerfile }}
           push: true
-          tags: ${{ needs.prepare.outputs.docker_registry }}/${{ needs.prepare.outputs.image_name }}:${{ needs.prepare.outputs.image_tag }}-${{ matrix.platform }}
-          platforms: ${{ matrix.platform }}
-          cache-from: |
-            type=local,src=/tmp/.buildx-cache
-            type=gha,scope=${{ github.workflow }}-${{ matrix.platform }}
-          cache-to: type=local,dest=/tmp/.buildx-cache-new,mode=max
+          tags: ${{ github.event.inputs.image_name }}
+          platforms: ${{ github.event.inputs.platforms }}
+          cache-from: type=gha,scope=${{ github.workflow }}
+          cache-to: type=gha,mode=max,scope=${{ github.workflow }}
           build-args: |
-            BUILDKIT_INLINE_CACHE=1
             BUILD_DATE=$(date -u +'%Y-%m-%dT%H:%M:%SZ')
             VCS_REF=${{ github.sha }}
-            TARGETPLATFORM=${{ matrix.platform }}
           labels: |
             org.opencontainers.image.created=$(date -u +'%Y-%m-%dT%H:%M:%SZ')
+            org.opencontainers.image.source=${{ github.event.inputs.repository }}
             org.opencontainers.image.revision=${{ github.sha }}
-            org.opencontainers.image.source=${{ needs.prepare.outputs.repo_url }}
-            org.opencontainers.image.platform=${{ matrix.platform }}
-          provenance: false
 
-      - name: 更新构建状态-构建完成
-        if: success() && github.event.inputs.status_callback_url != ''
+      - name: 镜像安全扫描
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: ${{ github.event.inputs.image_name }}
+          format: 'sarif'
+          output: 'trivy-results.sarif'
+          severity: 'CRITICAL,HIGH'
+          timeout: '5m'
+
+      - name: 上传扫描结果
+        uses: github/codeql-action/upload-sarif@v2
+        with:
+          sarif_file: 'trivy-results.sarif'
+          category: 'trivy'
+
+      - name: 构建结果通知
+        if: ${{ github.event.inputs.callback_url != '' }}
         run: |
           curl -X POST \
             -H "Content-Type: application/json" \
-            "${{ github.event.inputs.status_callback_url }}" \
+            "${{ github.event.inputs.callback_url }}" \
             -d '{
-              "run_id": "${{ github.run_id }}",
-              "platform": "${{ matrix.platform }}",
-              "status": "in_progress",
+              "status": "completed",
               "step": "构建完成",
               "message": "Docker镜像构建并推送成功",
-              "timestamp": "'$(date -u +"%Y-%m-%dT%H:%M:%SZ")'"
-            }'
-
-      - name: 更新构建状态-构建失败
-        if: failure() && github.event.inputs.status_callback_url != ''
-        run: |
-          curl -X POST \
-            -H "Content-Type: application/json" \
-            "${{ github.event.inputs.status_callback_url }}" \
-            -d '{
               "run_id": "${{ github.run_id }}",
-              "platform": "${{ matrix.platform }}",
-              "status": "failed",
-              "step": "构建失败",
-              "message": "Docker镜像构建失败",
+              "image": "${{ github.event.inputs.image_name }}",
+              "platforms": "${{ github.event.inputs.platforms }}",
               "timestamp": "'$(date -u +"%Y-%m-%dT%H:%M:%SZ")'"
-            }'
+            }' || echo "结果回调失败"
 
-      # 将新缓存移动到旧缓存位置，以便下次构建使用
-      - name: 移动缓存
-        run: |
-          rm -rf /tmp/.buildx-cache
-          mv /tmp/.buildx-cache-new /tmp/.buildx-cache
-
-      - name: 镜像安全扫描
-        uses: aquasecurity/trivy-action@master
-        with:
-          image-ref: ${{ needs.prepare.outputs.docker_registry }}/${{ needs.prepare.outputs.image_name }}:${{ needs.prepare.outputs.image_tag }}-${{ matrix.platform }}
-          format: 'sarif'
-          output: 'trivy-results.sarif'
-          severity: 'CRITICAL,HIGH'
-          timeout: '10m'
-
-      - name: 上传扫描结果
-        uses: github/codeql-action/upload-sarif@v3
-        with:
-          sarif_file: 'trivy-results.sarif'
-          category: 'trivy'
-
-      - name: 构建结果
+      - name: 构建完成通知
         run: |
           echo "Docker镜像构建完成!"
-          echo "镜像: ${{ needs.prepare.outputs.docker_registry }}/${{ needs.prepare.outputs.image_name }}:${{ needs.prepare.outputs.image_tag }}-${{ matrix.platform }}"
-          echo "平台: ${{ matrix.platform }}"
-
-  merge-manifests:
-    needs: [prepare, build-matrix]
-    # 仅当平台数量大于1时才需要合并镜像
-    if: ${{ needs.prepare.outputs.platform_count > 1 }}
-    runs-on: ubuntu-latest
-    steps:
-      - name: 设置Docker Buildx
-        uses: docker/setup-buildx-action@v2
-        with:
-          version: latest
-
-      - name: 登录到Docker仓库
-        uses: docker/login-action@v2
-        with:
-          registry: ${{ needs.prepare.outputs.docker_registry }}
-          username: ${{ needs.prepare.outputs.docker_username }}
-          password: ${{ needs.prepare.outputs.docker_password }}
-
-      - name: 创建并推送多平台清单
-        run: |
-          echo "开始创建多平台镜像清单..."
-          
-          # 获取平台列表
-          PLATFORMS="${{ needs.prepare.outputs.platforms }}"
-          IFS=',' read -ra PLATFORMS_ARRAY <<< "$PLATFORMS"
-          
-          # 构建源镜像列表
-          SOURCE_IMAGES=""
-          for platform in "${PLATFORMS_ARRAY[@]}"; do
-            SOURCE_IMAGES="$SOURCE_IMAGES ${{ needs.prepare.outputs.docker_registry }}/${{ needs.prepare.outputs.image_name }}:${{ needs.prepare.outputs.image_tag }}-$platform"
-          done
-          
-          # 创建并推送多平台清单
-          docker buildx imagetools create \
-            --tag ${{ needs.prepare.outputs.docker_registry }}/${{ needs.prepare.outputs.image_name }}:${{ needs.prepare.outputs.image_tag }} \
-            $SOURCE_IMAGES
-          
-          echo "多平台镜像清单创建并推送完成"
-          echo "最终镜像: ${{ needs.prepare.outputs.docker_registry }}/${{ needs.prepare.outputs.image_name }}:${{ needs.prepare.outputs.image_tag }}"
-          echo "支持平台: ${{ needs.prepare.outputs.platforms }}"
-
-  # 原有的构建作业保持不变，作为备选方案或单平台构建
-  build-and-push:
-    needs: prepare
-    # 当平台数量为1时，使用简单构建方式
-    if: ${{ needs.prepare.outputs.platform_count <= 1 }}
-    runs-on: ubuntu-latest
-    environment: production
-    steps:
-      - name: 检出代码
-        uses: actions/checkout@v3
-        with:
-          token: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: 创建工作目录
-        run: mkdir -p workspace
-
-      - name: 克隆目标仓库
-        if: ${{ github.event_name == 'workflow_dispatch' }}
-        run: |
-          if [ -n "${{ needs.prepare.outputs.repo_token }}" ]; then
-            # 使用令牌进行克隆，但不在日志中显示令牌
-            echo "使用提供的GitHub令牌克隆仓库..."
-            REPO_URL=$(echo "${{ needs.prepare.outputs.repo_url }}" | sed "s/https:\/\//https:\/\/${{ needs.prepare.outputs.repo_token }}@/g")
-            git clone --branch ${{ needs.prepare.outputs.repo_branch }} $REPO_URL ./source_code
-          else
-            echo "使用公开方式克隆仓库..."
-            git clone --branch ${{ needs.prepare.outputs.repo_branch }} ${{ needs.prepare.outputs.repo_url }} ./source_code
-          fi
-
-      - name: 处理用户文件
-        if: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.extra_config != 'Dockerfile|' }}
-        run: |
-          echo "开始处理用户文件..."
-          
-          # 检查用户文件JSON是否存在
-          if [ ! -f "user_files.json" ]; then
-            echo "未找到用户文件配置，跳过处理"
-            exit 0
-          fi
-          
-          # 遍历JSON中的每个文件
-          jq -c 'keys[]' user_files.json | while read -r key; do
-            # 移除引号
-            key=$(echo $key | sed 's/"//g')
-            
-            # 跳过虚拟目录标记
-            if [[ $key == *"__virtual_dir__"* ]]; then
-              echo "跳过虚拟目录标记: $key"
-              continue
-            fi
-            
-            # 获取文件路径和内容
-            path=$(jq -r ".[\"$key\"].path" user_files.json)
-            content=$(jq -r ".[\"$key\"].content" user_files.json)
-            
-            echo "处理文件: $path"
-            
-            # 创建目录
-            dir_path=$(dirname "./source_code/$path")
-            mkdir -p "$dir_path"
-            
-            # 创建文件
-            echo "$content" > "./source_code/$path"
-            echo "已创建文件: ./source_code/$path"
-          done
-          
-          echo "用户文件处理完成"
-          
-          # 安全措施：处理完成后删除用户文件JSON
-          rm -f user_files.json
-          echo "已删除用户文件配置JSON"
-
-      - name: 准备源代码
-        if: ${{ github.event_name == 'push' }}
-        run: |
-          # 直接使用检出的代码
-          cp -r . ./source_code
-
-      - name: 准备Dockerfile
-        run: |
-          echo "使用仓库中的Dockerfile: ${{ needs.prepare.outputs.dockerfile_path }}"
-          cp -f ./source_code/${{ needs.prepare.outputs.dockerfile_path }} ./Dockerfile
-          if [ ! -f "./Dockerfile" ]; then
-            echo "错误: 在仓库中找不到指定的Dockerfile!"
-            exit 1
-          fi
-          cat ./Dockerfile
-
-      - name: 预处理Dockerfile
-        run: |
-          # 检查是否需要创建特定目录
-          if grep -q "chmod.*-R.*777.*\/var\/www\/html\/install" ./Dockerfile || grep -q "chmod.*-R.*777.*\/var\/www\/html\/" ./Dockerfile; then
-            echo "检测到需要预创建目录的命令，修改Dockerfile以确保目录存在"
-            
-            # 创建临时Dockerfile
-            cp ./Dockerfile ./Dockerfile.orig
-            
-            # 查找相关目录设置
-            DIRS_TO_CREATE=""
-            if grep -q "\/var\/www\/html\/install" ./Dockerfile; then
-              DIRS_TO_CREATE="$DIRS_TO_CREATE /var/www/html/install"
-            fi
-            if grep -q "\/var\/www\/html\/file" ./Dockerfile; then
-              DIRS_TO_CREATE="$DIRS_TO_CREATE /var/www/html/file"
-            fi
-            if grep -q "\/var\/www\/html\/uploads" ./Dockerfile; then
-              DIRS_TO_CREATE="$DIRS_TO_CREATE /var/www/html/uploads"
-            fi
-            
-            # 添加创建目录命令到Dockerfile
-            if [ -n "$DIRS_TO_CREATE" ]; then
-              echo "将创建以下目录: $DIRS_TO_CREATE"
-              # 使用sed替换chown命令，添加mkdir命令
-              sed -i "s|chown -R www-data:www-data /var/www/html|mkdir -p $DIRS_TO_CREATE \&\& chown -R www-data:www-data /var/www/html|g" ./Dockerfile
-            fi
-            
-            # 显示修改后的Dockerfile
-            echo "修改后的Dockerfile:"
-            cat ./Dockerfile
-          fi
-
-      - name: 设置Docker Buildx
-        id: buildx
-        uses: docker/setup-buildx-action@v2
-        with:
-          version: latest
-          buildkitd-flags: --debug
-
-      - name: Docker构建缓存
-        uses: actions/cache@v3
-        with:
-          path: /tmp/.buildx-cache
-          key: ${{ runner.os }}-buildx-${{ hashFiles('**/Dockerfile') }}
-          restore-keys: |
-            ${{ runner.os }}-buildx-
-
-      - name: 登录到Docker仓库
-        uses: docker/login-action@v2
-        with:
-          registry: ${{ needs.prepare.outputs.docker_registry }}
-          username: ${{ needs.prepare.outputs.docker_username }}
-          password: ${{ needs.prepare.outputs.docker_password }}
-
-      - name: 构建并推送Docker镜像
-        uses: docker/build-push-action@v4
-        with:
-          context: ./source_code
-          file: ./Dockerfile
-          push: true
-          tags: ${{ needs.prepare.outputs.docker_registry }}/${{ needs.prepare.outputs.image_name }}:${{ needs.prepare.outputs.image_tag }}
-          platforms: ${{ needs.prepare.outputs.platforms }}
-          cache-from: |
-            type=local,src=/tmp/.buildx-cache
-            type=gha,scope=${{ github.workflow }}
-          cache-to: type=local,dest=/tmp/.buildx-cache-new,mode=max
-          build-args: |
-            BUILDKIT_INLINE_CACHE=1
-            BUILD_DATE=$(date -u +'%Y-%m-%dT%H:%M:%SZ')
-            VCS_REF=${{ github.sha }}
-          labels: |
-            org.opencontainers.image.created=$(date -u +'%Y-%m-%dT%H:%M:%SZ')
-            org.opencontainers.image.revision=${{ github.sha }}
-            org.opencontainers.image.source=${{ needs.prepare.outputs.repo_url }}
-          provenance: false
-
-      # 将新缓存移动到旧缓存位置，以便下次构建使用
-      - name: 移动缓存
-        run: |
-          rm -rf /tmp/.buildx-cache
-          mv /tmp/.buildx-cache-new /tmp/.buildx-cache
-
-      - name: 镜像安全扫描
-        uses: aquasecurity/trivy-action@master
-        with:
-          image-ref: ${{ needs.prepare.outputs.docker_registry }}/${{ needs.prepare.outputs.image_name }}:${{ needs.prepare.outputs.image_tag }}
-          format: 'sarif'
-          output: 'trivy-results.sarif'
-          severity: 'CRITICAL,HIGH'
-          timeout: '10m'
-
-      - name: 上传扫描结果
-        uses: github/codeql-action/upload-sarif@v3
-        with:
-          sarif_file: 'trivy-results.sarif'
-          category: 'trivy'
-
-      - name: 构建结果
-        run: |
-          echo "Docker镜像构建完成!"
-          echo "镜像: ${{ needs.prepare.outputs.docker_registry }}/${{ needs.prepare.outputs.image_name }}:${{ needs.prepare.outputs.image_tag }}"
-          echo "平台: ${{ needs.prepare.outputs.platforms }}"
+          echo "镜像: ${{ github.event.inputs.image_name }}"
+          echo "平台: ${{ github.event.inputs.platforms }}"

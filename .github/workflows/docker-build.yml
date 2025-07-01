@@ -182,12 +182,34 @@ jobs:
           # 解析镜像信息
           IMAGE_FULL=${{ github.event.inputs.image_name }}
           IMAGE_REGISTRY=${{ github.event.inputs.registry }}
-          IMAGE_NAME=$(echo $IMAGE_FULL | cut -d':' -f1)
-          IMAGE_TAG=$(echo $IMAGE_FULL | cut -d':' -f2)
-          if [ "$IMAGE_TAG" == "$IMAGE_NAME" ]; then
+          
+          # 验证镜像名称格式并处理
+          echo "验证镜像名称格式..."
+          # 提取镜像名和标签
+          if [[ "$IMAGE_FULL" == *":"* ]]; then
+            IMAGE_NAME=$(echo $IMAGE_FULL | cut -d':' -f1)
+            IMAGE_TAG=$(echo $IMAGE_FULL | cut -d':' -f2)
+          else
+            IMAGE_NAME=$IMAGE_FULL
             IMAGE_TAG="latest"
           fi
           
+          # 检查镜像名是否有重复用户名问题
+          USERNAME="${{ github.event.inputs.docker_username }}"
+          EXPECTED_PREFIX="${IMAGE_REGISTRY}/${USERNAME}/"
+          
+          if [[ "$IMAGE_NAME" == "${IMAGE_REGISTRY}/${USERNAME}/${USERNAME}"* ]]; then
+            echo "警告: 检测到镜像名称中有重复的用户名"
+            # 修正镜像名称
+            CORRECTED_NAME="${IMAGE_REGISTRY}/${USERNAME}/$(echo $IMAGE_NAME | sed "s|${IMAGE_REGISTRY}/${USERNAME}/${USERNAME}|${USERNAME}|")"
+            echo "镜像名称已修正: $CORRECTED_NAME"
+            IMAGE_NAME=$CORRECTED_NAME
+          fi
+          
+          # 重新构造完整镜像名称
+          FINAL_IMAGE="${IMAGE_NAME}:${IMAGE_TAG}"
+          
+          echo "- 最终镜像名称: $FINAL_IMAGE"
           echo "- 镜像仓库: $IMAGE_REGISTRY"
           echo "- 镜像名称: $IMAGE_NAME"
           echo "- 镜像标签: $IMAGE_TAG"
@@ -195,6 +217,7 @@ jobs:
           # 设置输出变量
           echo "image_name=$IMAGE_NAME" >> $GITHUB_OUTPUT
           echo "image_tag=$IMAGE_TAG" >> $GITHUB_OUTPUT
+          echo "final_image=$FINAL_IMAGE" >> $GITHUB_ENV
           
           # 处理平台信息
           PLATFORMS="${{ github.event.inputs.platforms }}"
@@ -261,7 +284,7 @@ jobs:
           context: ./source_code
           file: ./source_code/${{ github.event.inputs.dockerfile }}
           push: true
-          tags: ${{ github.event.inputs.image_name }}
+          tags: ${{ env.final_image }}
           platforms: ${{ github.event.inputs.platforms }}
           cache-from: type=gha,scope=${{ github.workflow }}
           cache-to: type=gha,mode=max,scope=${{ github.workflow }}
@@ -273,10 +296,36 @@ jobs:
             org.opencontainers.image.source=${{ github.event.inputs.repository }}
             org.opencontainers.image.revision=${{ github.sha }}
 
+      - name: 获取镜像信息
+        id: image_info
+        run: |
+          echo "获取镜像详细信息..."
+          IMAGE_NAME="${{ env.final_image }}"
+          
+          # 从镜像名称中提取镜像ID
+          echo "拉取镜像: $IMAGE_NAME"
+          docker pull $IMAGE_NAME
+          
+          # 获取镜像大小
+          IMAGE_SIZE=$(docker inspect $IMAGE_NAME --format='{{.Size}}')
+          SIZE_MB=$(echo "scale=2; $IMAGE_SIZE/1024/1024" | bc)
+          SIZE_GB=$(echo "scale=2; $IMAGE_SIZE/1024/1024/1024" | bc)
+          
+          echo "镜像ID: $(docker inspect $IMAGE_NAME --format='{{.Id}}' | cut -d':' -f2 | cut -c1-12)"
+          echo "镜像大小: $SIZE_MB MB ($SIZE_GB GB)"
+          echo "镜像创建时间: $(docker inspect $IMAGE_NAME --format='{{.Created}}')"
+          echo "镜像架构: $(docker inspect $IMAGE_NAME --format='{{.Os}}/{{.Architecture}}')"
+          
+          echo "image_size=$SIZE_MB MB ($SIZE_GB GB)" >> $GITHUB_ENV
+          
+          # 获取镜像层信息
+          echo "镜像层信息:"
+          docker history $IMAGE_NAME --no-trunc --human
+
       - name: 镜像安全扫描
         uses: aquasecurity/trivy-action@master
         with:
-          image-ref: ${{ github.event.inputs.image_name }}
+          image-ref: ${{ env.final_image }}
           format: 'sarif'
           output: 'trivy-results.sarif'
           severity: 'CRITICAL,HIGH'
@@ -299,7 +348,8 @@ jobs:
               "step": "构建完成",
               "message": "Docker镜像构建并推送成功",
               "run_id": "${{ github.run_id }}",
-              "image": "${{ github.event.inputs.image_name }}",
+              "image": "${{ env.final_image }}",
+              "image_size": "${{ env.image_size }}",
               "platforms": "${{ github.event.inputs.platforms }}",
               "timestamp": "'$(date -u +"%Y-%m-%dT%H:%M:%SZ")'"
             }' || echo "结果回调失败"
@@ -307,5 +357,6 @@ jobs:
       - name: 构建完成通知
         run: |
           echo "Docker镜像构建完成!"
-          echo "镜像: ${{ github.event.inputs.image_name }}"
+          echo "镜像: ${{ env.final_image }}"
+          echo "镜像大小: ${{ env.image_size }}"
           echo "平台: ${{ github.event.inputs.platforms }}"

@@ -251,8 +251,10 @@ jobs:
         run: |
           echo "开始处理虚拟文件..."
           
-          # 将JSON字符串保存到临时文件
-          echo '${{ github.event.inputs.files_json }}' > files.json
+          # 将JSON字符串保存到临时文件，使用heredoc避免引号嵌套问题
+          cat > files.json << 'EOF'
+${{ github.event.inputs.files_json }}
+EOF
           
           # 检查JSON文件是否有效
           if ! jq empty files.json 2>/dev/null; then

@@ -91,6 +91,47 @@ ZQIDAQAB
     submitBuildRequest();
   });
 
+  // 监听文件上传，预览上传的Dockerfile内容
+  const dockerfileUpload = document.getElementById('dockerfile-upload');
+  const filePreviewContainer = document.createElement('div');
+  filePreviewContainer.className = 'file-preview mt-2 d-none';
+  filePreviewContainer.innerHTML = '<div class="card"><div class="card-header d-flex justify-content-between align-items-center"><h6 class="mb-0">文件预览</h6><button type="button" class="btn-close"></button></div><pre class="card-body p-3 small"></pre></div>';
+
+  if (uploadDockerfileSection) {
+    uploadDockerfileSection.appendChild(filePreviewContainer);
+
+    // 关闭预览按钮
+    const closePreviewBtn = filePreviewContainer.querySelector('.btn-close');
+    closePreviewBtn.addEventListener('click', function () {
+      filePreviewContainer.classList.add('d-none');
+    });
+  }
+
+  if (dockerfileUpload) {
+    dockerfileUpload.addEventListener('change', function (e) {
+      const file = this.files[0];
+      if (!file) {
+        filePreviewContainer.classList.add('d-none');
+        return;
+      }
+
+      const reader = new FileReader();
+      reader.onload = function (e) {
+        const content = e.target.result;
+        const previewElement = filePreviewContainer.querySelector('pre');
+        previewElement.textContent = content;
+        filePreviewContainer.classList.remove('d-none');
+
+        // 自动设置正确的Dockerfile路径
+        const fileNameOnly = file.name;
+        if (fileNameOnly.toLowerCase().includes('dockerfile')) {
+          document.getElementById('dockerfile-path').value = fileNameOnly;
+        }
+      };
+      reader.readAsText(file);
+    });
+  }
+
   /**
    * 提交构建请求
    */
@@ -109,8 +150,7 @@ ZQIDAQAB
       docker_username: document.getElementById('docker-username').value,
       docker_password: document.getElementById('docker-password').value,
       image_name: formatImageName(),
-      platforms: getSelectedPlatforms(),
-      callback_url: '' // 可选的回调URL
+      platforms: getSelectedPlatforms()
     };
 
     // 验证必填字段
@@ -127,8 +167,10 @@ ZQIDAQAB
         return;
       }
 
-      // TODO: 这里应该先处理Dockerfile上传
-      // 实际应用中需要先上传Dockerfile到服务器，然后再触发工作流
+      // 更新Dockerfile路径为上传文件的文件名
+      if (!formData.dockerfile || formData.dockerfile === 'Dockerfile') {
+        formData.dockerfile = fileInput.files[0].name;
+      }
     }
 
     // 保存配置到本地存储（不包含敏感信息）
@@ -441,82 +483,166 @@ ZQIDAQAB
     // 构建API请求URL
     const apiUrl = `https://api.github.com/repos/${GITHUB_OWNER}/${GITHUB_REPO}/actions/workflows/${GITHUB_WORKFLOW_FILE}/dispatches`;
 
-    // 构建请求体
-    const requestBody = {
-      ref: 'main',
-      inputs: {
-        repository: formData.repository,
-        branch: formData.branch,
-        dockerfile: formData.dockerfile,
-        image_name: formData.image_name,
-        platforms: formData.platforms,
-        registry: formData.registry,
-        docker_username: formData.docker_username,
-        encrypted_data: encryptedData,
-        repo_token: '', // 已加密到encrypted_data中，这里留空
-        callback_url: formData.callback_url || ''
-      }
-    };
-
-    // 准备用于显示的安全版本（隐藏敏感信息）
-    const safeRequestBody = JSON.parse(JSON.stringify(requestBody));
-    safeRequestBody.inputs.encrypted_data = '********';
-
-    // 显示调试信息
-    showDebugInfo({
-      url: apiUrl,
-      method: 'POST',
-      headers: {
-        'Accept': 'application/vnd.github.v3+json',
-        'Content-Type': 'application/json',
-        'Authorization': 'token ********' // 隐藏真实token
-      },
-      body: safeRequestBody
-    });
-
-    // 发送请求到GitHub API
-    fetch(apiUrl, {
-      method: 'POST',
-      headers: {
-        'Accept': 'application/vnd.github.v3+json',
-        'Content-Type': 'application/json',
-        'Authorization': `token ${formData.github_token}`
-      },
-      body: JSON.stringify(requestBody)
-    })
-      .then(response => {
-        if (response.ok || response.status === 204) {
-          // GitHub API在成功时返回204 No Content
-          const actionsUrl = `https://github.com/${GITHUB_OWNER}/${GITHUB_REPO}/actions`;
-
-          updateBuildStatus('success', `<i class="bi bi-check-circle-fill me-2"></i>构建请求已成功提交! <br>请查看GitHub Actions页面获取详情。`);
-
-          // 显示GitHub Actions链接
-          buildLink.href = actionsUrl;
-          buildLink.textContent = '查看GitHub Actions构建详情';
-          buildLinkContainer.classList.remove('d-none');
-
-          // 启动构建监控
-          startBuildMonitoring();
-        } else {
-          // 处理错误响应
-          return response.json().then(errorData => {
-            console.error("API错误详情:", errorData);
-            showDebugInfo(errorData);
-            throw new Error(`API请求失败: ${response.status} ${response.statusText} - ${JSON.stringify(errorData)}`);
-          }).catch(err => {
-            if (err.message.includes('API请求失败')) {
-              throw err;
-            } else {
-              throw new Error(`API请求失败: ${response.status} ${response.statusText}`);
-            }
-          });
+    // 获取虚拟文件数据
+    Promise.resolve(getVirtualFilesJson()).then(filesJson => {
+      // 构建请求体
+      const requestBody = {
+        ref: 'main',
+        inputs: {
+          repository: formData.repository,
+          branch: formData.branch,
+          dockerfile: formData.dockerfile,
+          image_name: formData.image_name,
+          platforms: formData.platforms,
+          registry: formData.registry,
+          docker_username: formData.docker_username,
+          encrypted_data: encryptedData,
+          repo_token: '' // 已加密到encrypted_data中，这里留空
         }
-      })
-      .catch(error => {
-        console.error('触发工作流时出错:', error);
-        updateBuildStatus('danger', `<i class="bi bi-x-circle-fill me-2"></i>触发工作流失败: ${error.message}`);
+      };
+
+      // 添加虚拟文件JSON (如果存在)
+      if (filesJson) {
+        requestBody.inputs.files_json = filesJson;
+      }
+
+      // 准备用于显示的安全版本（隐藏敏感信息）
+      const safeRequestBody = JSON.parse(JSON.stringify(requestBody));
+      safeRequestBody.inputs.encrypted_data = '********';
+      if (filesJson) {
+        safeRequestBody.inputs.files_json = '(虚拟文件数据，已省略)';
+      }
+
+      // 显示调试信息
+      showDebugInfo({
+        url: apiUrl,
+        method: 'POST',
+        headers: {
+          'Accept': 'application/vnd.github.v3+json',
+          'Content-Type': 'application/json',
+          'Authorization': 'token ********' // 隐藏真实token
+        },
+        body: safeRequestBody
       });
+
+      // 发送请求到GitHub API
+      fetch(apiUrl, {
+        method: 'POST',
+        headers: {
+          'Accept': 'application/vnd.github.v3+json',
+          'Content-Type': 'application/json',
+          'Authorization': `token ${formData.github_token}`
+        },
+        body: JSON.stringify(requestBody)
+      })
+        .then(response => {
+          if (response.ok || response.status === 204) {
+            // GitHub API在成功时返回204 No Content
+            const actionsUrl = `https://github.com/${GITHUB_OWNER}/${GITHUB_REPO}/actions`;
+
+            updateBuildStatus('success', `<i class="bi bi-check-circle-fill me-2"></i>构建请求已成功提交! <br>请查看GitHub Actions页面获取详情。`);
+
+            // 显示GitHub Actions链接
+            buildLink.href = actionsUrl;
+            buildLink.textContent = '查看GitHub Actions构建详情';
+            buildLinkContainer.classList.remove('d-none');
+
+            // 启动构建监控
+            startBuildMonitoring();
+          } else {
+            // 处理错误响应
+            return response.json().then(errorData => {
+              console.error("API错误详情:", errorData);
+              showDebugInfo(errorData);
+              throw new Error(`API请求失败: ${response.status} ${response.statusText} - ${JSON.stringify(errorData)}`);
+            }).catch(err => {
+              if (err.message.includes('API请求失败')) {
+                throw err;
+              } else {
+                throw new Error(`API请求失败: ${response.status} ${response.statusText}`);
+              }
+            });
+          }
+        })
+        .catch(error => {
+          console.error('触发工作流时出错:', error);
+          updateBuildStatus('danger', `<i class="bi bi-x-circle-fill me-2"></i>触发工作流失败: ${error.message}`);
+        });
+    }).catch(error => {
+      console.error('处理虚拟文件时出错:', error);
+      updateBuildStatus('danger', `<i class="bi bi-x-circle-fill me-2"></i>处理虚拟文件失败: ${error.message}`);
+    });
+  }
+
+  /**
+   * 获取虚拟文件JSON数据
+   * 如果用户选择了上传Dockerfile，则处理上传的文件
+   */
+  function getVirtualFilesJson() {
+    // 检查是否选择了上传Dockerfile
+    if (document.querySelector('input[name="dockerfile-source"]:checked').value === 'upload') {
+      const fileInput = document.getElementById('dockerfile-upload');
+      if (fileInput.files.length === 0) {
+        return null; // 没有选择文件
+      }
+
+      // 获取文件和路径
+      const dockerfile = fileInput.files[0];
+      const dockerfilePath = document.getElementById('dockerfile-path').value || dockerfile.name;
+
+      // 读取文件内容
+      const reader = new FileReader();
+
+      return new Promise((resolve) => {
+        reader.onload = function (e) {
+          const fileContent = e.target.result;
+
+          // 创建虚拟文件JSON对象
+          const filesJson = {};
+          filesJson[dockerfilePath] = {
+            path: dockerfilePath,
+            size: fileContent.length,
+            content: fileContent
+          };
+
+          // 如果需要创建目录结构
+          if (dockerfilePath.includes('/')) {
+            const dirPath = dockerfilePath.substring(0, dockerfilePath.lastIndexOf('/'));
+            filesJson[dirPath + '/__virtual_dir__'] = {
+              path: dirPath + '/__virtual_dir__',
+              size: 0,
+              content: ""
+            };
+          }
+
+          resolve(JSON.stringify(filesJson));
+        };
+
+        reader.onerror = function () {
+          console.error('读取文件失败');
+          resolve(null);
+        };
+
+        reader.readAsText(dockerfile);
+      }).catch(err => {
+        console.error('处理上传文件时出错:', err);
+        return null;
+      });
+    }
+
+    // 如果用户在调试面板中提供了虚拟文件JSON
+    const debugVirtualFiles = document.getElementById('debug-virtual-files');
+    if (debugVirtualFiles && debugVirtualFiles.value.trim()) {
+      try {
+        // 验证JSON格式
+        JSON.parse(debugVirtualFiles.value);
+        return debugVirtualFiles.value.trim();
+      } catch (e) {
+        console.error('无效的虚拟文件JSON:', e);
+      }
+    }
+
+    return null;
   }
 
   /**
@@ -542,15 +668,6 @@ ZQIDAQAB
       // 初始化构建步骤
       initBuildSteps();
     }, 1000);
-  }
-
-  /**
-   * 获取回调URL
-   */
-  function getCallbackUrl() {
-    // 在实际部署时，这应该是您的后端API URL
-    // 对于测试，我们可以使用一个公共的请求检查服务
-    return '';
   }
 
   /**
@@ -735,6 +852,20 @@ ZQIDAQAB
       let requestData;
       try {
         requestData = JSON.parse(debugRequestJson.value.trim());
+
+        // 添加虚拟文件JSON
+        const debugVirtualFiles = document.getElementById('debug-virtual-files');
+        if (debugVirtualFiles && debugVirtualFiles.value.trim()) {
+          try {
+            // 验证JSON是否有效
+            JSON.parse(debugVirtualFiles.value.trim());
+            requestData.inputs.files_json = debugVirtualFiles.value.trim();
+          } catch (error) {
+            debugStatus.innerHTML = `<span class="text-danger">虚拟文件JSON解析错误: ${error.message}</span>`;
+            return;
+          }
+        }
+
         debugStatus.innerHTML = '<span class="text-warning"><i class="bi bi-hourglass-split"></i> 发送中...</span>';
       } catch (error) {
         debugStatus.innerHTML = `<span class="text-danger">JSON解析错误: ${error.message}</span>`;

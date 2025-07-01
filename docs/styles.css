@@ -336,3 +336,112 @@ footer a:hover {
 .pulse {
   animation: pulse 2s infinite;
 }
+
+/* 添加虚拟文件功能相关样式 */
+.cursor-pointer {
+  cursor: pointer;
+}
+
+.file-preview pre {
+  max-height: 200px;
+  overflow: auto;
+  background-color: #f8f9fa;
+  border-radius: 0.25rem;
+  font-family: 'Fira Code', monospace;
+}
+
+#virtual-files-format pre {
+  font-family: 'Fira Code', monospace;
+  font-size: 0.8rem;
+  background-color: #f0f0f0;
+  padding: 0.5rem;
+  border-radius: 0.25rem;
+}
+
+/* 构建步骤样式 */
+.build-steps {
+  display: flex;
+  flex-wrap: wrap;
+  margin-bottom: 1rem;
+}
+
+.build-step {
+  display: flex;
+  align-items: center;
+  position: relative;
+  padding: 0.5rem 1.5rem 0.5rem 0.5rem;
+  margin-right: 1rem;
+  margin-bottom: 0.5rem;
+  border-radius: 0.25rem;
+  background-color: #f0f0f0;
+  color: #6c757d;
+  font-size: 0.9rem;
+}
+
+.build-step:after {
+  content: '';
+  position: absolute;
+  right: -0.5rem;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 0;
+  height: 0;
+  border-top: 0.5rem solid transparent;
+  border-bottom: 0.5rem solid transparent;
+  border-left: 0.5rem solid #f0f0f0;
+}
+
+.build-step-icon {
+  margin-right: 0.5rem;
+}
+
+.build-step.active {
+  background-color: #007bff;
+  color: white;
+}
+
+.build-step.active:after {
+  border-left-color: #007bff;
+}
+
+.build-step.completed {
+  background-color: #28a745;
+  color: white;
+}
+
+.build-step.completed:after {
+  border-left-color: #28a745;
+}
+
+.build-step.failed {
+  background-color: #dc3545;
+  color: white;
+}
+
+.build-step.failed:after {
+  border-left-color: #dc3545;
+}
+
+/* 日志容器样式 */
+.build-log-container {
+  height: 300px;
+  overflow-y: auto;
+  background-color: #212529;
+  color: #f8f9fa;
+  font-family: 'Fira Code', monospace;
+  font-size: 0.85rem;
+  padding: 1rem;
+  border-radius: 0.25rem;
+  margin-bottom: 1rem;
+}
+
+.build-log-container div {
+  white-space: pre-wrap;
+  word-break: break-all;
+}
+
+/* 调试工具样式 */
+.debug-info pre {
+  font-family: 'Fira Code', monospace;
+  font-size: 0.8rem;
+}

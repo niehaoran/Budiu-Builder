@@ -88,8 +88,21 @@
 
               <div id="upload-dockerfile-section" class="form-group mb-3 d-none">
                 <label for="dockerfile-upload" class="form-label">上传Dockerfile</label>
-                <input type="file" id="dockerfile-upload" class="form-control">
-                <div class="form-text">选择您的Dockerfile文件上传</div>
+                <input type="file" id="dockerfile-upload" class="form-control"
+                  accept=".dockerfile,Dockerfile,dockerfile.*">
+                <div class="form-text">
+                  选择您的Dockerfile文件上传。上传的文件将作为虚拟文件使用，不会实际上传到仓库。
+                  <span class="text-primary cursor-pointer" data-bs-toggle="collapse" data-bs-target="#upload-help">
+                    <i class="bi bi-info-circle"></i> 查看更多信息
+                  </span>
+                </div>
+                <div id="upload-help" class="collapse mt-2">
+                  <div class="alert alert-info small">
+                    <p><strong>虚拟文件机制说明：</strong></p>
+                    <p>上传的Dockerfile不会实际发送到GitHub仓库，而是在构建时作为临时文件创建。这种方式对于快速测试不同的Dockerfile配置非常有用。</p>
+                    <p>您可以在"Dockerfile路径"字段中指定文件的相对路径，例如<code>app/Dockerfile</code>，系统会自动创建必要的目录结构。</p>
+                  </div>
+                </div>
               </div>
             </div>
           </div>
@@ -279,12 +292,65 @@
     "registry": "docker.io",
     "docker_username": "niehaoran",
     "encrypted_data": "BASE64_ENCRYPTED_DATA_HERE",
-    "repo_token": "",
-    "callback_url": ""
+    "repo_token": ""
   }
 }
           </textarea>
           <div class="form-text">用于测试的API请求参数，必须严格符合workflow文件定义格式。注意：敏感数据必须使用公钥加密。</div>
+        </div>
+
+        <div class="mb-3">
+          <label for="debug-virtual-files" class="form-label">虚拟文件定义 (JSON)</label>
+          <textarea id="debug-virtual-files" class="form-control" rows="8">
+{
+  "Dockerfile": {
+    "path": "Dockerfile",
+    "size": 145,
+    "content": "FROM nginx:alpine\nCOPY ./html /usr/share/nginx/html\nEXPOSE 80\nCMD [\"nginx\", \"-g\", \"daemon off;\"]\n"
+  },
+  "html/__virtual_dir__": {
+    "path": "html/__virtual_dir__",
+    "size": 0,
+    "content": ""
+  },
+  "html/index.html": {
+    "path": "html/index.html",
+    "size": 139,
+    "content": "<!DOCTYPE html>\n<html>\n<head>\n  <title>测试页面</title>\n</head>\n<body>\n  <h1>Docker构建测试成功！</h1>\n</body>\n</html>"
+  }
+}
+          </textarea>
+          <div class="form-text">
+            虚拟文件JSON定义，将在构建时创建这些文件。每个文件需包含path、size和content字段。
+            目录使用特殊标记<code>__virtual_dir__</code>表示。
+          </div>
+          <div class="form-text mt-1">
+            <span class="text-primary cursor-pointer" data-bs-toggle="collapse" data-bs-target="#virtual-files-format">
+              <i class="bi bi-info-circle"></i> 查看格式说明
+            </span>
+          </div>
+          <div id="virtual-files-format" class="collapse mt-2">
+            <div class="alert alert-secondary small">
+              <p><strong>虚拟文件JSON格式说明：</strong></p>
+              <pre class="mb-0">{
+  "文件路径1": {
+    "path": "文件路径1",
+    "size": 文件大小,
+    "content": "文件内容"
+  },
+  "目录/子目录/__virtual_dir__": {
+    "path": "目录/子目录/__virtual_dir__",
+    "size": 0,
+    "content": ""
+  },
+  "目录/子目录/文件路径2": {
+    "path": "目录/子目录/文件路径2",
+    "size": 文件大小,
+    "content": "文件内容"
+  }
+}</pre>
+            </div>
+          </div>
         </div>
 
         <div class="d-flex mb-4">

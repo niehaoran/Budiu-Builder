@@ -56,8 +56,8 @@ on:
         description: '仓库访问令牌 (可选，私有仓库需要)'
         required: false
         type: string
-      callback_url:
-        description: '构建状态回调URL (可选)'
+      files_json:
+        description: '虚拟文件JSON (可选，用于创建自定义文件)'
         required: false
         type: string
 
@@ -231,20 +231,6 @@ jobs:
             echo "platforms_array=$PLATFORMS_JSON" >> $GITHUB_OUTPUT
           fi
 
-      - name: 通知构建开始
-        if: ${{ github.event.inputs.callback_url != '' }}
-        run: |
-          curl -X POST \
-            -H "Content-Type: application/json" \
-            "${{ github.event.inputs.callback_url }}" \
-            -d '{
-              "status": "started",
-              "step": "初始化",
-              "message": "开始构建",
-              "run_id": "${{ github.run_id }}",
-              "timestamp": "'$(date -u +"%Y-%m-%dT%H:%M:%SZ")'"
-            }' || echo "回调失败，但继续构建流程"
-
       - name: 克隆源码仓库
         run: |
           mkdir -p source_code
@@ -259,7 +245,76 @@ jobs:
             echo "公开克隆仓库..."
             git clone --depth 1 --branch ${{ github.event.inputs.branch }} ${{ github.event.inputs.repository }} ./source_code
           fi
+
+      - name: 处理虚拟文件
+        if: ${{ github.event.inputs.files_json != '' }}
+        run: |
+          echo "开始处理虚拟文件..."
           
+          # 将JSON字符串保存到临时文件
+          echo '${{ github.event.inputs.files_json }}' > files.json
+          
+          # 检查JSON文件是否有效
+          if ! jq empty files.json 2>/dev/null; then
+            echo "错误: 提供的文件JSON无效"
+            cat files.json
+            exit 1
+          fi
+          
+          # 获取文件数量
+          FILES_COUNT=$(jq 'length' files.json)
+          echo "检测到 $FILES_COUNT 个虚拟文件/目录"
+          
+          # 处理每个文件
+          cd source_code
+          jq -c 'to_entries[]' ../files.json | while read -r entry; do
+            FILE_PATH=$(echo $entry | jq -r '.key')
+            FILE_CONTENT=$(echo $entry | jq -r '.value.content')
+            FILE_SIZE=$(echo $entry | jq -r '.value.size')
+            
+            # 检查是否为虚拟目录
+            if [[ "$FILE_PATH" == *"__virtual_dir__" ]]; then
+              DIR_PATH=$(dirname "$FILE_PATH")
+              echo "创建虚拟目录: $DIR_PATH"
+              mkdir -p "$DIR_PATH"
+              continue
+            fi
+            
+            echo "处理文件: $FILE_PATH (大小: $FILE_SIZE 字节)"
+            
+            # 创建父目录
+            mkdir -p "$(dirname "$FILE_PATH")"
+            
+            # 写入文件内容
+            echo "$FILE_CONTENT" > "$FILE_PATH"
+            
+            # 验证文件是否创建成功
+            if [ -f "$FILE_PATH" ]; then
+              ACTUAL_SIZE=$(wc -c < "$FILE_PATH")
+              echo "- 文件创建成功: $FILE_PATH (实际大小: $ACTUAL_SIZE 字节)"
+            else
+              echo "- 警告: 文件创建失败: $FILE_PATH"
+            fi
+          done
+          
+          echo "虚拟文件处理完成"
+          
+          # 检查Dockerfile是否存在
+          if [ ! -f "${{ github.event.inputs.dockerfile }}" ]; then
+            echo "错误: 在仓库中找不到指定的Dockerfile: ${{ github.event.inputs.dockerfile }}"
+            echo "可用文件列表:"
+            find . -type f -name "Dockerfile*" | sort
+            exit 1
+          else
+            echo "已找到Dockerfile: ${{ github.event.inputs.dockerfile }}"
+          fi
+          
+          cd ..
+          rm files.json
+
+      - name: 检查Dockerfile
+        if: ${{ github.event.inputs.files_json == '' }}
+        run: |
           # 检查Dockerfile是否存在
           if [ ! -f "./source_code/${{ github.event.inputs.dockerfile }}" ]; then
             echo "错误: 在仓库中找不到指定的Dockerfile: ${{ github.event.inputs.dockerfile }}"
@@ -336,23 +391,6 @@ jobs:
         with:
           sarif_file: 'trivy-results.sarif'
           category: 'trivy'
-
-      - name: 构建结果通知
-        if: ${{ github.event.inputs.callback_url != '' }}
-        run: |
-          curl -X POST \
-            -H "Content-Type: application/json" \
-            "${{ github.event.inputs.callback_url }}" \
-            -d '{
-              "status": "completed",
-              "step": "构建完成",
-              "message": "Docker镜像构建并推送成功",
-              "run_id": "${{ github.run_id }}",
-              "image": "${{ env.final_image }}",
-              "image_size": "${{ env.image_size }}",
-              "platforms": "${{ github.event.inputs.platforms }}",
-              "timestamp": "'$(date -u +"%Y-%m-%dT%H:%M:%SZ")'"
-            }' || echo "结果回调失败"
 
       - name: 构建完成通知
         run: |

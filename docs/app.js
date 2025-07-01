@@ -43,6 +43,17 @@ document.addEventListener('DOMContentLoaded', function () {
   let buildStepStatuses = new Map();
   let websocket = null;
 
+  // 公钥 - 用于加密敏感信息
+  const PUBLIC_KEY = `-----BEGIN PUBLIC KEY-----
+MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAqfTSIZOKdkusOg0vQaHv
+FgS3GlOJdsV1sXcPtUxvfiRY0yaZg7D1cDp+twmLVmwiibzsaNvQPbqtSYZ7BiXt
+nk8Yf6twPDdwiXvdwlgunJCKd63rY9Q5aeP4h2WsULoJr5hAVGAuMFchih+6xVIy
+KO0BBoTpTaTz1F0mxCeaGUfqT4HeR37dwjPgMUfrGFi5kELJIYClaDxatAbPjHAm
+Ydr3CJHg82wXsqP9sm4xOr7m1/fenOGGpeNfjZtyM0kt9expc4wBLJ7Z4/Bn8TPm
+oMMWmkHbImy4uvflwKiezj9mId8yHrqeCj58wC3e8TGm7qUbLI8jrWH5kA1yTDdj
+ZQIDAQAB
+-----END PUBLIC KEY-----`;
+
   // 在页面加载时恢复保存的配置
   restoreFormConfig();
 
@@ -125,8 +136,121 @@ document.addEventListener('DOMContentLoaded', function () {
       saveFormConfig(formData);
     }
 
-    // 触发GitHub Actions工作流
-    triggerGitHubWorkflow(formData);
+    // 加密敏感信息
+    encryptSensitiveData(formData)
+      .then(encryptedData => {
+        // 加密成功后触发GitHub Actions工作流
+        triggerGitHubWorkflow(formData, encryptedData);
+      })
+      .catch(error => {
+        console.error('加密敏感信息时出错:', error);
+        updateBuildStatus('danger', `<i class="bi bi-x-circle-fill me-2"></i>加密敏感信息失败: ${error.message}`);
+      });
+  }
+
+  /**
+   * 加密敏感信息
+   * @param {Object} formData 表单数据
+   * @returns {Promise<string>} 加密后的Base64字符串
+   */
+  function encryptSensitiveData(formData) {
+    return new Promise((resolve, reject) => {
+      try {
+        // 创建需要加密的数据对象
+        const sensitiveData = {
+          docker_password: formData.docker_password
+        };
+
+        // 如果提供了repo_token，也进行加密
+        if (formData.repo_token) {
+          sensitiveData.repo_token = formData.repo_token;
+        }
+
+        // 将数据转为JSON字符串
+        const dataString = JSON.stringify(sensitiveData);
+
+        // 导入公钥
+        window.crypto.subtle.importKey(
+          'spki',
+          pemToArrayBuffer(PUBLIC_KEY),
+          {
+            name: 'RSA-OAEP',
+            hash: { name: 'SHA-256' }
+          },
+          true,
+          ['encrypt']
+        )
+          .then(publicKey => {
+            // 将数据转为ArrayBuffer
+            const encoder = new TextEncoder();
+            const dataBuffer = encoder.encode(dataString);
+
+            // 使用公钥加密数据
+            return window.crypto.subtle.encrypt(
+              {
+                name: 'RSA-OAEP'
+              },
+              publicKey,
+              dataBuffer
+            );
+          })
+          .then(encryptedBuffer => {
+            // 将加密后的数据转为Base64
+            const encryptedArray = new Uint8Array(encryptedBuffer);
+            const base64Encoded = arrayBufferToBase64(encryptedArray);
+            resolve(base64Encoded);
+          })
+          .catch(error => {
+            reject(new Error(`加密失败: ${error.message}`));
+          });
+      } catch (error) {
+        reject(new Error(`加密过程中出错: ${error.message}`));
+      }
+    });
+  }
+
+  /**
+   * 将PEM格式的密钥转换为ArrayBuffer
+   * @param {string} pem PEM格式的密钥
+   * @returns {ArrayBuffer} 转换后的ArrayBuffer
+   */
+  function pemToArrayBuffer(pem) {
+    // 移除头尾和换行符，并解码Base64
+    const base64 = pem
+      .replace('-----BEGIN PUBLIC KEY-----', '')
+      .replace('-----END PUBLIC KEY-----', '')
+      .replace(/\s/g, '');
+
+    // 解码Base64为ArrayBuffer
+    return base64ToArrayBuffer(base64);
+  }
+
+  /**
+   * 将Base64转换为ArrayBuffer
+   * @param {string} base64 Base64字符串
+   * @returns {ArrayBuffer} 转换后的ArrayBuffer
+   */
+  function base64ToArrayBuffer(base64) {
+    const binaryString = atob(base64);
+    const bytes = new Uint8Array(binaryString.length);
+    for (let i = 0; i < binaryString.length; i++) {
+      bytes[i] = binaryString.charCodeAt(i);
+    }
+    return bytes.buffer;
+  }
+
+  /**
+   * 将ArrayBuffer转换为Base64
+   * @param {ArrayBuffer} buffer ArrayBuffer
+   * @returns {string} Base64字符串
+   */
+  function arrayBufferToBase64(buffer) {
+    let binary = '';
+    const bytes = new Uint8Array(buffer);
+    for (let i = 0; i < bytes.byteLength; i++) {
+      binary += String.fromCharCode(bytes[i]);
+    }
+    return btoa(binary);
   }
 
   /**
@@ -272,7 +396,7 @@ document.addEventListener('DOMContentLoaded', function () {
   /**
    * 实际触发GitHub Actions工作流
    */
-  function triggerGitHubWorkflow(formData) {
+  function triggerGitHubWorkflow(formData, encryptedData) {
     // 检查是否提供了GitHub Token
     if (!formData.github_token) {
       updateBuildStatus('warning', '<i class="bi bi-exclamation-triangle-fill me-2"></i>未提供GitHub Token，无法自动触发工作流。请提供GitHub Token后重试。');
@@ -295,16 +419,15 @@ document.addEventListener('DOMContentLoaded', function () {
         platforms: formData.platforms,
         registry: formData.registry,
         docker_username: formData.docker_username,
-        docker_password: formData.docker_password,
-        repo_token: formData.repo_token || '',
+        encrypted_data: encryptedData,
+        repo_token: '', // 已加密到encrypted_data中，这里留空
         callback_url: formData.callback_url || ''
       }
     };
 
     // 准备用于显示的安全版本（隐藏敏感信息）
     const safeRequestBody = JSON.parse(JSON.stringify(requestBody));
-    safeRequestBody.inputs.docker_password = '********';
-    safeRequestBody.inputs.repo_token = formData.repo_token ? '********' : '';
+    safeRequestBody.inputs.encrypted_data = '********';
 
     // 显示调试信息
     showDebugInfo({

@@ -48,8 +48,8 @@ on:
         description: 'Docker仓库用户名'
         required: true
         type: string
-      docker_password:
-        description: 'Docker仓库密码/令牌'
+      encrypted_data:
+        description: '加密的敏感信息 (使用仓库公钥加密的base64字符串)'
         required: true
         type: string
       repo_token:
@@ -69,6 +69,69 @@ jobs:
         uses: actions/checkout@v3
         with:
           token: ${{ github.token }}
+
+      - name: 解密敏感信息
+        id: decrypt
+        env:
+          ENCRYPTED_DATA: ${{ github.event.inputs.encrypted_data }}
+          PRIVATE_KEY: ${{ secrets.DECRYPT_PRIVATE_KEY }}
+        run: |
+          if [ -z "$ENCRYPTED_DATA" ]; then
+            echo "错误: 未提供加密数据"
+            exit 1
+          fi
+          
+          if [ -z "$PRIVATE_KEY" ]; then
+            echo "错误: 未提供解密私钥，请在仓库设置中添加DECRYPT_PRIVATE_KEY密钥"
+            exit 1
+          fi
+          
+          echo "开始解密敏感信息..."
+          # 将私钥保存到临时文件
+          echo "$PRIVATE_KEY" > private_key.pem
+          chmod 600 private_key.pem
+          
+          # 解码base64并解密数据
+          echo "$ENCRYPTED_DATA" | base64 -d > encrypted_data.bin || {
+            echo "错误: 无法解码base64数据"
+            exit 1
+          }
+          
+          openssl pkeyutl -decrypt -inkey private_key.pem -in encrypted_data.bin -out decrypted_data.json || {
+            echo "错误: 无法解密数据，请检查私钥是否正确"
+            exit 1
+          }
+          
+          # 检查解密后的文件是否为有效JSON
+          if ! jq empty decrypted_data.json 2>/dev/null; then
+            echo "错误: 解密后的数据不是有效的JSON"
+            exit 1
+          fi
+          
+          # 读取解密后的数据
+          DOCKER_PASSWORD=$(jq -r '.docker_password' decrypted_data.json)
+          
+          # 检查是否成功获取Docker密码
+          if [ "$DOCKER_PASSWORD" = "null" ] || [ -z "$DOCKER_PASSWORD" ]; then
+            echo "错误: 未从解密数据中找到docker_password"
+            exit 1
+          else
+            echo "成功获取Docker密码"
+            echo "docker_password=$DOCKER_PASSWORD" >> $GITHUB_OUTPUT
+          fi
+          
+          # 获取额外的敏感数据（如果有）
+          OTHER_TOKEN=$(jq -r '.repo_token // ""' decrypted_data.json)
+          if [ -n "$OTHER_TOKEN" ] && [ "$OTHER_TOKEN" != "null" ]; then
+            echo "repo_token=$OTHER_TOKEN" >> $GITHUB_OUTPUT
+          else
+            echo "未在加密数据中找到额外的repo_token，将使用明文提供的token（如果有）"
+          fi
+          
+          # 删除临时文件
+          rm -f private_key.pem encrypted_data.bin decrypted_data.json
+          
+          echo "敏感信息解密处理完成"
 
       - name: 输出构建信息
         id: build_info
@@ -126,9 +189,12 @@ jobs:
       - name: 克隆源码仓库
         run: |
           mkdir -p source_code
-          if [ -n "${{ github.event.inputs.repo_token }}" ]; then
+          # 使用解密的repo_token（如果有），否则使用输入参数中提供的token
+          REPO_TOKEN="${{ steps.decrypt.outputs.repo_token || github.event.inputs.repo_token }}"
+          
+          if [ -n "$REPO_TOKEN" ]; then
             echo "使用令牌克隆仓库..."
-            REPO_URL=$(echo "${{ github.event.inputs.repository }}" | sed "s/https:\/\//https:\/\/${{ github.event.inputs.repo_token }}@/g")
+            REPO_URL=$(echo "${{ github.event.inputs.repository }}" | sed "s/https:\/\//https:\/\/$REPO_TOKEN@/g")
             git clone --depth 1 --branch ${{ github.event.inputs.branch }} $REPO_URL ./source_code
           else
             echo "公开克隆仓库..."
@@ -151,7 +217,7 @@ jobs:
         with:
           registry: ${{ github.event.inputs.registry }}
           username: ${{ github.event.inputs.docker_username }}
-          password: ${{ github.event.inputs.docker_password }}
+          password: ${{ steps.decrypt.outputs.docker_password }}
 
       - name: 构建并推送多平台Docker镜像
         uses: docker/build-push-action@v4

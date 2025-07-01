@@ -8,13 +8,25 @@
   <link rel="stylesheet" href="styles.css">
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css">
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.10.0/font/bootstrap-icons.css">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Fira+Code&display=swap"
+    rel="stylesheet">
 </head>
 
 <body>
   <div class="container">
     <header class="text-center my-4">
+      <div class="mb-3">
+        <i class="bi bi-boxes text-primary" style="font-size: 3rem;"></i>
+      </div>
       <h1>Budiu Docker Builder Pro</h1>
       <p class="lead">使用GitHub Actions自动构建多平台Docker镜像</p>
+      <div class="badges mt-2">
+        <span class="badge bg-primary"><i class="bi bi-github me-1"></i>GitHub Actions</span>
+        <span class="badge bg-success"><i class="bi bi-layers me-1"></i>多架构支持</span>
+        <span class="badge bg-info"><i class="bi bi-shield-check me-1"></i>安全扫描</span>
+      </div>
     </header>
 
     <div class="card shadow mb-4">
@@ -266,10 +278,29 @@
     </div>
   </div>
 
-  <footer class="bg-light py-3 text-center">
+  <footer class="bg-light py-4 text-center">
     <div class="container">
-      <p class="mb-0">Budiu Docker Builder Pro | <a href="https://github.com/niehaoran/Budiu-Builder"
-          target="_blank">GitHub仓库</a></p>
+      <div class="row">
+        <div class="col-md-4 text-md-start mb-3 mb-md-0">
+          <h6 class="fw-bold text-primary"><i class="bi bi-boxes me-2"></i>Budiu Docker Builder</h6>
+          <p class="small text-muted mb-0">使用GitHub Actions自动构建多平台Docker镜像</p>
+        </div>
+        <div class="col-md-4 mb-3 mb-md-0">
+          <h6 class="fw-bold">快速链接</h6>
+          <ul class="list-unstyled small">
+            <li><a href="https://github.com/niehaoran/Budiu-Builder" target="_blank"><i
+                  class="bi bi-github me-1"></i>GitHub仓库</a></li>
+            <li><a href="https://github.com/niehaoran/Budiu-Builder/issues" target="_blank"><i
+                  class="bi bi-exclamation-circle me-1"></i>问题报告</a></li>
+            <li><a href="https://github.com/niehaoran/Budiu-Builder#readme" target="_blank"><i
+                  class="bi bi-book me-1"></i>使用文档</a></li>
+          </ul>
+        </div>
+        <div class="col-md-4 text-md-end">
+          <p class="mb-1 small">版本 <span class="badge bg-primary">v1.0.0</span></p>
+          <p class="small text-muted mb-0">© 2023 Budiu Builder. MIT License.</p>
+        </div>
+      </div>
     </div>
   </footer>
 

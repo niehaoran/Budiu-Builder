@@ -251,6 +251,12 @@ document.addEventListener('DOMContentLoaded', function () {
     // 构建API请求参数
     const apiUrl = `https://api.github.com/repos/${GITHUB_OWNER}/${GITHUB_REPO}/actions/workflows/${GITHUB_WORKFLOW_FILE}/dispatches`;
 
+    // 修改请求体格式，使其符合GitHub API期望的格式
+    // 将参数分解为GitHub工作流期望的格式
+    const build_config = `${formData.repo_url}|${formData.repo_branch}`;
+    const docker_config = `${formData.docker_registry}|${formData.docker_username}|${formData.image_name}:${formData.image_tag}|${formData.platforms}`;
+    const extra_config = `${formData.dockerfile_path}|`;
+
     // 发送请求到GitHub API
     fetch(apiUrl, {
       method: 'POST',
@@ -261,7 +267,13 @@ document.addEventListener('DOMContentLoaded', function () {
       },
       body: JSON.stringify({
         ref: 'main',
-        inputs: workflowInputs
+        inputs: {
+          build_config: build_config,
+          docker_config: docker_config,
+          extra_config: extra_config,
+          status_callback_url: workflowInputs.status_callback_url,
+          encrypted_secrets: btoa(formData.docker_password) // 简单编码，实际应该使用公钥加密
+        }
       })
     })
       .then(response => {
@@ -279,7 +291,16 @@ document.addEventListener('DOMContentLoaded', function () {
           // 启动WebSocket连接并显示构建日志容器
           startBuildMonitoring();
         } else {
-          throw new Error(`API请求失败: ${response.status} ${response.statusText}`);
+          // 如果有错误响应，尝试读取详细信息
+          return response.json().then(errorData => {
+            throw new Error(`API请求失败: ${response.status} ${response.statusText} - ${JSON.stringify(errorData)}`);
+          }).catch(err => {
+            if (err.message.includes('API请求失败')) {
+              throw err;
+            } else {
+              throw new Error(`API请求失败: ${response.status} ${response.statusText}`);
+            }
+          });
         }
       })
       .catch(error => {

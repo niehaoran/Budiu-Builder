@@ -248,13 +248,13 @@ jobs:
 
       - name: 处理虚拟文件
         if: ${{ github.event.inputs.files_json != '' }}
+        env:
+          FILES_JSON: ${{ github.event.inputs.files_json }}
         run: |
           echo "开始处理虚拟文件..."
           
-          # 将JSON字符串保存到临时文件，使用heredoc避免引号嵌套问题
-          cat > files.json << 'EOF'
-${{ github.event.inputs.files_json }}
-EOF
+          # 将JSON字符串保存到临时文件
+          echo "$FILES_JSON" > files.json
           
           # 检查JSON文件是否有效
           if ! jq empty files.json 2>/dev/null; then

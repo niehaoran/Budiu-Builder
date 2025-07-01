@@ -276,6 +276,47 @@
         </div>
       </div>
     </div>
+
+    <!-- 添加调试工具区域 -->
+    <div class="card shadow mb-4">
+      <div class="card-header bg-warning text-white d-flex justify-content-between align-items-center">
+        <h2 class="h5 mb-0"><i class="bi bi-bug-fill me-2"></i>调试工具</h2>
+        <button class="btn btn-sm btn-outline-light" type="button" data-bs-toggle="collapse"
+          data-bs-target="#debug-tools">
+          展开/收起
+        </button>
+      </div>
+      <div id="debug-tools" class="card-body collapse">
+        <h5>手动构建测试</h5>
+        <div class="mb-3">
+          <label for="debug-github-token" class="form-label">GitHub Token</label>
+          <input type="password" id="debug-github-token" class="form-control">
+        </div>
+
+        <div class="mb-3">
+          <label for="debug-request-json" class="form-label">请求参数 (JSON)</label>
+          <textarea id="debug-request-json" class="form-control" rows="8">
+{
+  "ref": "main",
+  "inputs": {
+    "build_config": "https://github.com/whyour/qinglong|develop",
+    "docker_config": "docker.io|niehaoran|niehaoran/qinglong:latest|linux/amd64",
+    "extra_config": "docker/Dockerfile|",
+    "status_callback_url": "https://your-backend-api.com/api/build-status"
+  }
+}
+          </textarea>
+          <div class="form-text">用于测试的API请求参数，必须严格符合workflow文件定义格式</div>
+        </div>
+
+        <div class="d-flex">
+          <button id="send-test-request" class="btn btn-warning">
+            <i class="bi bi-send-fill me-2"></i>发送测试请求
+          </button>
+          <div id="debug-status" class="ms-3 align-self-center"></div>
+        </div>
+      </div>
+    </div>
   </div>
 
   <footer class="bg-light py-4 text-center">

@@ -11,6 +11,12 @@ document.addEventListener('DOMContentLoaded', function () {
   const saveConfigCheckbox = document.getElementById('save-config');
   const platformsSelect = document.getElementById('platforms-select');
 
+  // 调试工具相关元素
+  const debugGithubToken = document.getElementById('debug-github-token');
+  const debugRequestJson = document.getElementById('debug-request-json');
+  const sendTestRequest = document.getElementById('send-test-request');
+  const debugStatus = document.getElementById('debug-status');
+
   // GitHub配置
   const GITHUB_OWNER = 'niehaoran'; // 替换为实际的GitHub用户名
   const GITHUB_REPO = 'Budiu-Builder'; // 替换为实际的仓库名
@@ -238,6 +244,32 @@ document.addEventListener('DOMContentLoaded', function () {
     buildStatus.innerHTML = `<p class="mb-0">${message}</p>`;
   }
 
+  // 显示调试信息
+  function showDebugInfo(data) {
+    const debugContainer = document.createElement('div');
+    debugContainer.className = 'debug-info mt-2 p-3 bg-light border rounded';
+
+    const heading = document.createElement('h6');
+    heading.className = 'mb-2 text-secondary';
+    heading.innerHTML = '<i class="bi bi-bug"></i> 调试信息';
+    debugContainer.appendChild(heading);
+
+    const pre = document.createElement('pre');
+    pre.className = 'mb-0 small';
+    pre.style.maxHeight = '200px';
+    pre.style.overflow = 'auto';
+    pre.textContent = JSON.stringify(data, null, 2);
+    debugContainer.appendChild(pre);
+
+    // 如果已存在调试信息，则替换
+    const existingDebug = buildStatus.querySelector('.debug-info');
+    if (existingDebug) {
+      existingDebug.remove();
+    }
+
+    buildStatus.appendChild(debugContainer);
+  }
+
   // 实际触发GitHub Actions工作流
   function triggerGitHubWorkflow(formData, workflowInputs) {
     // 检查是否提供了GitHub Token
@@ -251,11 +283,46 @@ document.addEventListener('DOMContentLoaded', function () {
     // 构建API请求参数
     const apiUrl = `https://api.github.com/repos/${GITHUB_OWNER}/${GITHUB_REPO}/actions/workflows/${GITHUB_WORKFLOW_FILE}/dispatches`;
 
-    // 修改请求体格式，使其符合GitHub API期望的格式
-    // 将参数分解为GitHub工作流期望的格式
+    // 严格按照.github/workflows/docker-build.yml文件中定义的输入参数格式构造请求
+    // 1. build_config: 'github_repo|github_branch'
     const build_config = `${formData.repo_url}|${formData.repo_branch}`;
-    const docker_config = `${formData.docker_registry}|${formData.docker_username}|${formData.image_name}:${formData.image_tag}|${formData.platforms}`;
+
+    // 2. docker_config: 'registry|username|image_full_name|platforms'
+    const image_full_name = `${formData.image_name}:${formData.image_tag}`;
+    const docker_config = `${formData.docker_registry}|${formData.docker_username}|${image_full_name}|${formData.platforms}`;
+
+    // 3. extra_config: 'dockerfile_path|user_files_base64'
     const extra_config = `${formData.dockerfile_path}|`;
+
+    // 4. encrypted_secrets: 可选，这里简单用base64编码
+    // 实际应用中应使用公钥加密
+    const docker_password_encoded = formData.docker_password ? btoa(formData.docker_password) : '';
+
+    // 准备请求数据，用于显示调试信息
+    const requestData = {
+      url: apiUrl,
+      method: 'POST',
+      headers: {
+        'Accept': 'application/vnd.github.v3+json',
+        'Content-Type': 'application/json',
+        'Authorization': 'token ********' // 隐藏真实token
+      },
+      body: {
+        ref: 'main',
+        inputs: {
+          build_config,
+          docker_config,
+          extra_config,
+          encrypted_secrets: docker_password_encoded ? '******' : '', // 隐藏敏感信息
+          status_callback_url: workflowInputs.status_callback_url || ''
+        }
+      }
+    };
+
+    console.log("发送请求到GitHub Actions：", requestData);
+
+    // 显示调试信息
+    showDebugInfo(requestData);
 
     // 发送请求到GitHub API
     fetch(apiUrl, {
@@ -271,8 +338,8 @@ document.addEventListener('DOMContentLoaded', function () {
           build_config: build_config,
           docker_config: docker_config,
           extra_config: extra_config,
-          status_callback_url: workflowInputs.status_callback_url,
-          encrypted_secrets: btoa(formData.docker_password) // 简单编码，实际应该使用公钥加密
+          encrypted_secrets: docker_password_encoded,
+          status_callback_url: workflowInputs.status_callback_url || ''
         }
       })
     })
@@ -293,6 +360,8 @@ document.addEventListener('DOMContentLoaded', function () {
         } else {
           // 如果有错误响应，尝试读取详细信息
           return response.json().then(errorData => {
+            console.error("API错误详情:", JSON.stringify(errorData));
+            showDebugInfo(errorData);
             throw new Error(`API请求失败: ${response.status} ${response.statusText} - ${JSON.stringify(errorData)}`);
           }).catch(err => {
             if (err.message.includes('API请求失败')) {
@@ -559,5 +628,57 @@ document.addEventListener('DOMContentLoaded', function () {
         console.error('获取构建日志失败:', error);
         buildLogs.innerHTML = `<div class="text-danger">获取构建日志失败: ${error.message}</div>`;
       });
+  }
+
+  // 调试工具 - 发送测试请求
+  if (sendTestRequest) {
+    sendTestRequest.addEventListener('click', function () {
+      const token = debugGithubToken.value;
+      if (!token) {
+        debugStatus.innerHTML = '<span class="text-danger">请提供GitHub Token</span>';
+        return;
+      }
+
+      let requestData;
+      try {
+        requestData = JSON.parse(debugRequestJson.value.trim());
+        debugStatus.innerHTML = '<span class="text-warning"><i class="bi bi-hourglass-split"></i> 发送中...</span>';
+      } catch (error) {
+        debugStatus.innerHTML = `<span class="text-danger">JSON解析错误: ${error.message}</span>`;
+        return;
+      }
+
+      // 发送API请求
+      const apiUrl = `https://api.github.com/repos/${GITHUB_OWNER}/${GITHUB_REPO}/actions/workflows/${GITHUB_WORKFLOW_FILE}/dispatches`;
+
+      fetch(apiUrl, {
+        method: 'POST',
+        headers: {
+          'Accept': 'application/vnd.github.v3+json',
+          'Content-Type': 'application/json',
+          'Authorization': `token ${token}`
+        },
+        body: JSON.stringify(requestData)
+      })
+        .then(response => {
+          console.log("测试请求响应:", response);
+
+          if (response.ok || response.status === 204) {
+            debugStatus.innerHTML = '<span class="text-success"><i class="bi bi-check-circle"></i> 请求成功!</span>';
+            updateBuildStatus('success', `<i class="bi bi-check-circle-fill me-2"></i>测试请求已成功提交!<br><a href="https://github.com/${GITHUB_OWNER}/${GITHUB_REPO}/actions" target="_blank">查看GitHub Actions</a>`);
+          } else {
+            return response.json().then(errorData => {
+              console.error("API错误详情:", errorData);
+              debugStatus.innerHTML = `<span class="text-danger"><i class="bi bi-x-circle"></i> 请求失败: ${response.status}</span>`;
+              showDebugInfo(errorData);
+              throw new Error(`API请求失败: ${response.status} ${response.statusText}`);
+            });
+          }
+        })
+        .catch(error => {
+          console.error('测试请求出错:', error);
+          debugStatus.innerHTML = `<span class="text-danger"><i class="bi bi-x-circle"></i> 错误: ${error.message}</span>`;
+        });
+    });
   }
 }); 

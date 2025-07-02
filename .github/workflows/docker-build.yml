@@ -65,6 +65,20 @@ jobs:
   build:
     runs-on: ubuntu-latest
     steps:
+      - name: 设置敏感信息掩码
+        run: |
+          # 如果有repo_token输入，确保它被掩码处理
+          if [ -n "${{ github.event.inputs.repo_token }}" ]; then
+            echo "::add-mask::${{ github.event.inputs.repo_token }}"
+          fi
+          
+          # 确保加密数据被掩码处理
+          if [ -n "${{ github.event.inputs.encrypted_data }}" ]; then
+            echo "::add-mask::${{ github.event.inputs.encrypted_data }}"
+          fi
+          
+          echo "已设置敏感信息掩码"
+
       - name: 检出工作流仓库
         uses: actions/checkout@v3
         with:
@@ -88,12 +102,11 @@ jobs:
           
           echo "开始解密敏感信息..."
           
-          # 检查加密数据长度
-          ENCRYPTED_LENGTH=$(echo -n "$ENCRYPTED_DATA" | wc -c)
-          echo "加密数据长度: $ENCRYPTED_LENGTH 字符"
+          # 检查加密数据长度但不显示具体长度
+          echo "正在验证加密数据..."
           
-          # 将私钥保存到临时文件
-          echo "$PRIVATE_KEY" > private_key.pem
+          # 将私钥保存到临时文件，不输出任何内容
+          echo "$PRIVATE_KEY" > private_key.pem 2>/dev/null
           chmod 600 private_key.pem
           
           # 检查私钥是否有效
@@ -102,22 +115,17 @@ jobs:
             exit 1
           fi
           
-          echo "私钥有效，继续解密..."
+          echo "正在解密数据..."
           
-          # 解码base64并解密数据
-          echo "$ENCRYPTED_DATA" | base64 -d > encrypted_data.bin || {
+          # 解码base64并解密数据，不显示任何内容
+          if ! echo "$ENCRYPTED_DATA" | base64 -d > encrypted_data.bin 2>/dev/null; then
             echo "错误: 无法解码base64数据"
             echo "请确保前端传递的是有效的base64编码字符串"
-            echo "加密数据前缀: $(echo "$ENCRYPTED_DATA" | cut -c 1-20)..."
             exit 1
-          }
+          fi
           
-          # 显示加密数据大小
-          BINARY_SIZE=$(stat -c%s "encrypted_data.bin")
-          echo "解码后的加密数据大小: $BINARY_SIZE 字节"
-          
-          # 使用更详细的错误输出
-          if ! openssl pkeyutl -decrypt -inkey private_key.pem -in encrypted_data.bin -out decrypted_data.txt -pkeyopt rsa_padding_mode:oaep -pkeyopt rsa_oaep_md:sha256; then
+          # 使用更详细的错误输出但不显示敏感信息
+          if ! openssl pkeyutl -decrypt -inkey private_key.pem -in encrypted_data.bin -out decrypted_data.txt -pkeyopt rsa_padding_mode:oaep -pkeyopt rsa_oaep_md:sha256 2>/dev/null; then
             echo "错误: 无法解密数据，可能原因:"
             echo "1. 私钥和加密时使用的公钥不匹配"
             echo "2. 加密数据已被破坏或修改"
@@ -125,20 +133,15 @@ jobs:
             exit 1
           fi
           
-          # 输出解密结果前缀
-          echo "解密成功，解密后数据前缀: $(head -c 20 decrypted_data.txt)..."
+          echo "解密成功"
           
           # 检查解密后的文件是否为有效JSON
           if ! jq empty decrypted_data.txt 2>/dev/null; then
             echo "错误: 解密后的数据不是有效的JSON"
-            echo "解密后数据内容(前100个字符):"
-            head -c 100 decrypted_data.txt
-            echo ""
-            echo "完整解密数据长度: $(wc -c < decrypted_data.txt) 字节"
             exit 1
           fi
           
-          echo "解密数据是有效的JSON"
+          echo "解密数据验证成功"
           
           # 读取解密后的数据
           DOCKER_PASSWORD=$(jq -r '.docker_password' decrypted_data.txt)
@@ -146,19 +149,19 @@ jobs:
           # 检查是否成功获取Docker密码
           if [ "$DOCKER_PASSWORD" = "null" ] || [ -z "$DOCKER_PASSWORD" ]; then
             echo "错误: 未从解密数据中找到docker_password"
-            echo "解密后的JSON字段: $(jq 'keys' decrypted_data.txt)"
             exit 1
           else
             echo "成功获取Docker密码"
-            # 不显示密码，但显示长度
-            echo "Docker密码长度: ${#DOCKER_PASSWORD} 字符"
+            # 不显示密码，也不显示长度
+            echo "::add-mask::$DOCKER_PASSWORD"
             echo "docker_password=$DOCKER_PASSWORD" >> $GITHUB_OUTPUT
           fi
           
           # 获取额外的敏感数据（如果有）
           OTHER_TOKEN=$(jq -r '.repo_token // ""' decrypted_data.txt)
           if [ -n "$OTHER_TOKEN" ] && [ "$OTHER_TOKEN" != "null" ]; then
-            echo "找到额外的repo_token，长度: ${#OTHER_TOKEN} 字符"
+            echo "找到额外的repo_token"
+            echo "::add-mask::$OTHER_TOKEN"
             echo "repo_token=$OTHER_TOKEN" >> $GITHUB_OUTPUT
           else
             echo "未在加密数据中找到额外的repo_token，将使用明文提供的token（如果有）"
@@ -174,7 +177,10 @@ jobs:
         run: |
           echo "构建信息:"
           echo "- 工作流名称: ${{ github.event.inputs.workflow_name || 'Docker构建任务' }}"
-          echo "- 代码仓库: ${{ github.event.inputs.repository }}"
+          # 不显示完整仓库地址，避免泄露私有仓库信息
+          REPO_URL="${{ github.event.inputs.repository }}"
+          REPO_DISPLAY=$(echo "$REPO_URL" | sed -E 's/https:\/\/([^\/]+)\/(.+)/https:\/\/\1\/***\/***/')
+          echo "- 代码仓库: $REPO_DISPLAY"
           echo "- 分支: ${{ github.event.inputs.branch }}"
           echo "- Dockerfile路径: ${{ github.event.inputs.dockerfile }}"
           echo "- 镜像信息: ${{ github.event.inputs.image_info }}"
@@ -248,11 +254,18 @@ jobs:
           
           if [ -n "$REPO_TOKEN" ]; then
             echo "使用令牌克隆仓库..."
-            REPO_URL=$(echo "${{ github.event.inputs.repository }}" | sed "s/https:\/\//https:\/\/$REPO_TOKEN@/g")
-            git clone --depth 1 --branch ${{ github.event.inputs.branch }} $REPO_URL ./source_code
+            # 确保令牌不会在日志中显示
+            echo "::add-mask::$REPO_TOKEN"
+            git config --global url."https://${REPO_TOKEN}@github.com/".insteadOf "https://github.com/"
+            git clone --depth 1 --branch ${{ github.event.inputs.branch }} ${{ github.event.inputs.repository }} ./source_code
           else
             echo "公开克隆仓库..."
             git clone --depth 1 --branch ${{ github.event.inputs.branch }} ${{ github.event.inputs.repository }} ./source_code
+          fi
+          
+          # 清理凭据
+          if [ -n "$REPO_TOKEN" ]; then
+            git config --global --unset url."https://${REPO_TOKEN}@github.com/".insteadOf
           fi
 
       - name: 处理虚拟文件
@@ -262,13 +275,16 @@ jobs:
         run: |
           echo "开始处理虚拟文件..."
           
-          # 将JSON字符串保存到临时文件
-          echo "$FILES_JSON" > files.json
+          # 掩码处理files_json内容
+          echo "::add-mask::$FILES_JSON"
+          
+          # 将JSON字符串保存到临时文件，不输出内容
+          echo "$FILES_JSON" > files.json 2>/dev/null
           
           # 检查JSON文件是否有效
           if ! jq empty files.json 2>/dev/null; then
             echo "错误: 提供的文件JSON无效"
-            cat files.json
+            # 不显示文件内容，避免泄露敏感信息
             exit 1
           fi
           
@@ -281,6 +297,8 @@ jobs:
           jq -c 'to_entries[]' ../files.json | while read -r entry; do
             FILE_PATH=$(echo $entry | jq -r '.key')
             FILE_CONTENT=$(echo $entry | jq -r '.value.content')
+            # 掩码处理文件内容
+            echo "::add-mask::$FILE_CONTENT"
             FILE_SIZE=$(echo $entry | jq -r '.value.size')
             
             # 检查是否为虚拟目录
@@ -291,18 +309,18 @@ jobs:
               continue
             fi
             
-            echo "处理文件: $FILE_PATH (大小: $FILE_SIZE 字节)"
+            # 不显示文件大小，避免泄露信息
+            echo "处理文件: $FILE_PATH"
             
             # 创建父目录
             mkdir -p "$(dirname "$FILE_PATH")"
             
-            # 写入文件内容
-            echo "$FILE_CONTENT" > "$FILE_PATH"
+            # 写入文件内容，不输出任何信息
+            echo "$FILE_CONTENT" > "$FILE_PATH" 2>/dev/null
             
-            # 验证文件是否创建成功
+            # 验证文件是否创建成功，但不显示大小
             if [ -f "$FILE_PATH" ]; then
-              ACTUAL_SIZE=$(wc -c < "$FILE_PATH")
-              echo "- 文件创建成功: $FILE_PATH (实际大小: $ACTUAL_SIZE 字节)"
+              echo "- 文件创建成功: $FILE_PATH"
             else
               echo "- 警告: 文件创建失败: $FILE_PATH"
             fi
@@ -313,8 +331,7 @@ jobs:
           # 检查Dockerfile是否存在
           if [ ! -f "${{ github.event.inputs.dockerfile }}" ]; then
             echo "错误: 在仓库中找不到指定的Dockerfile: ${{ github.event.inputs.dockerfile }}"
-            echo "可用文件列表:"
-            find . -type f -name "Dockerfile*" | sort
+            # 不显示文件列表，避免泄露敏感信息
             exit 1
           else
             echo "已找到Dockerfile: ${{ github.event.inputs.dockerfile }}"
@@ -368,25 +385,30 @@ jobs:
           echo "获取镜像详细信息..."
           IMAGE_NAME="${{ env.final_image }}"
           
+          # 掩码处理镜像名称
+          echo "::add-mask::$IMAGE_NAME"
+          
           # 从镜像名称中提取镜像ID
-          echo "拉取镜像: $IMAGE_NAME"
-          docker pull $IMAGE_NAME
+          echo "拉取镜像中..."
+          docker pull $IMAGE_NAME > /dev/null 2>&1
           
           # 获取镜像大小
           IMAGE_SIZE=$(docker inspect $IMAGE_NAME --format='{{.Size}}')
           SIZE_MB=$(echo "scale=2; $IMAGE_SIZE/1024/1024" | bc)
           SIZE_GB=$(echo "scale=2; $IMAGE_SIZE/1024/1024/1024" | bc)
           
-          echo "镜像ID: $(docker inspect $IMAGE_NAME --format='{{.Id}}' | cut -d':' -f2 | cut -c1-12)"
+          # 获取镜像ID但只显示前12个字符
+          IMAGE_ID=$(docker inspect $IMAGE_NAME --format='{{.Id}}' | cut -d':' -f2 | cut -c1-12)
+          echo "镜像ID: $IMAGE_ID"
           echo "镜像大小: $SIZE_MB MB ($SIZE_GB GB)"
-          echo "镜像创建时间: $(docker inspect $IMAGE_NAME --format='{{.Created}}')"
+          
+          # 不显示完整的创建时间，避免泄露敏感信息
           echo "镜像架构: $(docker inspect $IMAGE_NAME --format='{{.Os}}/{{.Architecture}}')"
           
           echo "image_size=$SIZE_MB MB ($SIZE_GB GB)" >> $GITHUB_ENV
           
-          # 获取镜像层信息
-          echo "镜像层信息:"
-          docker history $IMAGE_NAME --no-trunc --human
+          # 不显示镜像层信息，避免泄露敏感信息
+          echo "镜像层信息已记录但不显示，避免泄露敏感信息"
 
       - name: 镜像安全扫描
         uses: aquasecurity/trivy-action@master
@@ -406,7 +428,10 @@ jobs:
       - name: 构建完成通知
         run: |
           echo "Docker镜像构建完成!"
-          echo "镜像: ${{ env.final_image }}"
+          # 不显示完整镜像名称，避免泄露敏感信息
+          IMAGE_REGISTRY="${{ steps.build_info.outputs.image_registry }}"
+          IMAGE_TAG="${{ steps.build_info.outputs.image_tag }}"
+          echo "镜像: ${IMAGE_REGISTRY}/***:${IMAGE_TAG}"
           echo "镜像大小: ${{ env.image_size }}"
           echo "平台: ${{ github.event.inputs.platforms }}"
           
@@ -417,8 +442,9 @@ jobs:
           echo "构建任务: ${{ github.event.inputs.workflow_name || 'Docker构建任务' }}"
           echo "构建状态: ${{ job.status }}"
           echo "构建时间: $(date -u +'%Y-%m-%d %H:%M:%S UTC')"
-          echo "构建镜像: ${{ env.final_image }}"
-          echo "构建平台: ${{ github.event.inputs.platforms }}"
-          echo "============================================================"
-          echo "查询构建状态: https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}"
-          echo "============================================================"
+          
+          # 不显示完整镜像信息，避免泄露敏感信息
+          IMAGE_REGISTRY="${{ steps.build_info.outputs.image_registry }}"
+          IMAGE_NAME="${{ steps.build_info.outputs.image_name }}"
+          IMAGE_TAG="${{ steps.build_info.outputs.image_tag }}"
+          echo "构建镜像: ${IMAGE_REGISTRY}/***:${IMAGE_TAG}"

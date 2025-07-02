@@ -437,6 +437,7 @@ jobs:
           
       - name: 构建状态输出
         if: always()
+        id: build_status
         run: |
           echo "============================================================"
           echo "构建任务: ${{ github.event.inputs.workflow_name || 'Docker构建任务' }}"
@@ -448,3 +449,50 @@ jobs:
           IMAGE_NAME="${{ steps.build_info.outputs.image_name }}"
           IMAGE_TAG="${{ steps.build_info.outputs.image_tag }}"
           echo "构建镜像: ${IMAGE_REGISTRY}/***:${IMAGE_TAG}"
+          
+          echo "构建平台: ${{ github.event.inputs.platforms }}"
+          echo "============================================================"
+          
+          # 提供工作流运行链接，方便前端直接查看构建过程
+          WORKFLOW_URL="https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+          echo "查询构建状态: $WORKFLOW_URL"
+          echo "workflow_url=$WORKFLOW_URL" >> $GITHUB_OUTPUT
+          echo "============================================================"
+          
+      - name: 设置构建结果输出
+        if: always()
+        id: build_result
+        run: |
+          # 创建包含工作流运行URL的JSON输出
+          cat > build_result.json << EOF
+          {
+            "workflow_name": "${{ github.event.inputs.workflow_name || 'Docker构建任务' }}",
+            "status": "${{ job.status }}",
+            "build_time": "$(date -u +'%Y-%m-%d %H:%M:%S UTC')",
+            "workflow_url": "${{ steps.build_status.outputs.workflow_url }}",
+            "image_registry": "${{ steps.build_info.outputs.image_registry }}",
+            "image_tag": "${{ steps.build_info.outputs.image_tag }}",
+            "image_size": "${{ env.image_size }}",
+            "platforms": "${{ github.event.inputs.platforms }}"
+          }
+          EOF
+          
+          # 将结果输出到GITHUB_OUTPUT，便于其他工作流或API获取
+          echo "workflow_name=${{ github.event.inputs.workflow_name || 'Docker构建任务' }}" >> $GITHUB_OUTPUT
+          echo "status=${{ job.status }}" >> $GITHUB_OUTPUT
+          echo "workflow_url=${{ steps.build_status.outputs.workflow_url }}" >> $GITHUB_OUTPUT
+          
+          echo "构建结果JSON已生成，前端可通过API获取此信息"
+      
+      - name: 上传构建结果
+        if: always()
+        uses: actions/upload-artifact@v3
+        with:
+          name: build-result-${{ github.run_id }}
+          path: build_result.json
+          retention-days: 7
+          
+    outputs:
+      workflow_name: ${{ steps.build_result.outputs.workflow_name }}
+      status: ${{ steps.build_result.outputs.status }}
+      workflow_url: ${{ steps.build_result.outputs.workflow_url }}

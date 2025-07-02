@@ -35,8 +35,8 @@ on:
         required: true
         default: 'Dockerfile'
         type: string
-      image_info:
-        description: '镜像信息 (格式: registry/username/image:tag，例如: docker.io/username/image:tag)'
+      image_info_base64:
+        description: '镜像信息(base64编码的JSON，包含registry, name, tag字段)'
         required: true
         type: string
       platforms:
@@ -177,54 +177,49 @@ jobs:
           echo "- 代码仓库: ${{ github.event.inputs.repository }}"
           echo "- 分支: ${{ github.event.inputs.branch }}"
           echo "- Dockerfile路径: ${{ github.event.inputs.dockerfile }}"
-          echo "- 镜像信息: ${{ github.event.inputs.image_info }}"
+          echo "- 镜像信息(base64): ${{ github.event.inputs.image_info_base64 }}"
           echo "- 构建平台: ${{ github.event.inputs.platforms }}"
           
-          # 解析镜像信息
-          IMAGE_FULL="${{ github.event.inputs.image_info }}"
+          # 解码base64获取镜像信息JSON
+          echo "解码镜像信息..."
+          IMAGE_INFO_JSON=$(echo "${{ github.event.inputs.image_info_base64 }}" | base64 -d)
+          echo "解码后的镜像信息: $IMAGE_INFO_JSON"
           
-          # 提取镜像仓库、名称和标签
-          if [[ "$IMAGE_FULL" == *":"* ]]; then
-            IMAGE_WITHOUT_TAG=$(echo $IMAGE_FULL | cut -d':' -f1)
-            IMAGE_TAG=$(echo $IMAGE_FULL | cut -d':' -f2)
-          else
-            IMAGE_WITHOUT_TAG=$IMAGE_FULL
-            IMAGE_TAG="latest"
-          fi
+          # 从JSON中提取镜像信息
+          IMAGE_REGISTRY=$(echo $IMAGE_INFO_JSON | jq -r '.registry // "docker.io"')
+          IMAGE_NAME=$(echo $IMAGE_INFO_JSON | jq -r '.name')
+          IMAGE_TAG=$(echo $IMAGE_INFO_JSON | jq -r '.tag // "latest"')
           
-          # 提取仓库地址
-          if [[ "$IMAGE_WITHOUT_TAG" == *"/"* ]]; then
-            IMAGE_REGISTRY=$(echo $IMAGE_WITHOUT_TAG | cut -d'/' -f1)
-            IMAGE_NAME_WITH_USER=$(echo $IMAGE_WITHOUT_TAG | cut -d'/' -f2-)
-          else
-            IMAGE_REGISTRY="docker.io"
-            IMAGE_NAME_WITH_USER=$IMAGE_WITHOUT_TAG
+          # 验证必要字段
+          if [ -z "$IMAGE_NAME" ] || [ "$IMAGE_NAME" = "null" ]; then
+            echo "错误: 镜像名称不能为空"
+            exit 1
           fi
           
           echo "- 镜像仓库: $IMAGE_REGISTRY"
-          echo "- 镜像名称: $IMAGE_NAME_WITH_USER"
+          echo "- 镜像名称: $IMAGE_NAME"
           echo "- 镜像标签: $IMAGE_TAG"
           
           # 检查镜像名是否有重复用户名问题
           USERNAME="${{ github.event.inputs.docker_username }}"
           EXPECTED_PREFIX="${USERNAME}/"
           
-          if [[ "$IMAGE_NAME_WITH_USER" == "${USERNAME}/${USERNAME}"* ]]; then
+          if [[ "$IMAGE_NAME" == "${USERNAME}/${USERNAME}"* ]]; then
             echo "警告: 检测到镜像名称中有重复的用户名"
             # 修正镜像名称
-            CORRECTED_NAME="${USERNAME}/$(echo $IMAGE_NAME_WITH_USER | sed "s|${USERNAME}/${USERNAME}|${USERNAME}|")"
+            CORRECTED_NAME="${USERNAME}/$(echo $IMAGE_NAME | sed "s|${USERNAME}/${USERNAME}|${USERNAME}|")"
             echo "镜像名称已修正: $CORRECTED_NAME"
-            IMAGE_NAME_WITH_USER=$CORRECTED_NAME
+            IMAGE_NAME=$CORRECTED_NAME
           fi
           
           # 重新构造完整镜像名称
-          FINAL_IMAGE="${IMAGE_REGISTRY}/${IMAGE_NAME_WITH_USER}:${IMAGE_TAG}"
+          FINAL_IMAGE="${IMAGE_REGISTRY}/${IMAGE_NAME}:${IMAGE_TAG}"
           
           echo "- 最终镜像名称: $FINAL_IMAGE"
           
           # 设置输出变量
           echo "image_registry=$IMAGE_REGISTRY" >> $GITHUB_OUTPUT
-          echo "image_name=$IMAGE_NAME_WITH_USER" >> $GITHUB_OUTPUT
+          echo "image_name=$IMAGE_NAME" >> $GITHUB_OUTPUT
           echo "image_tag=$IMAGE_TAG" >> $GITHUB_OUTPUT
           echo "final_image=$FINAL_IMAGE" >> $GITHUB_ENV
           

@@ -92,7 +92,7 @@ jobs:
           ENCRYPTED_LENGTH=$(echo -n "$ENCRYPTED_DATA" | wc -c)
           echo "加密数据长度: $ENCRYPTED_LENGTH 字符"
           
-          # 将私钥保存到临时文件（不输出私钥内容）
+          # 将私钥保存到临时文件
           echo "$PRIVATE_KEY" > private_key.pem
           chmod 600 private_key.pem
           
@@ -104,10 +104,11 @@ jobs:
           
           echo "私钥有效，继续解密..."
           
-          # 解码base64并解密数据（不显示内容）
+          # 解码base64并解密数据
           echo "$ENCRYPTED_DATA" | base64 -d > encrypted_data.bin || {
             echo "错误: 无法解码base64数据"
             echo "请确保前端传递的是有效的base64编码字符串"
+            echo "加密数据前缀: $(echo "$ENCRYPTED_DATA" | cut -c 1-20)..."
             exit 1
           }
           
@@ -124,11 +125,15 @@ jobs:
             exit 1
           fi
           
-          echo "解密成功"
+          # 输出解密结果前缀
+          echo "解密成功，解密后数据前缀: $(head -c 20 decrypted_data.txt)..."
           
-          # 检查解密后的文件是否为有效JSON（不显示内容）
+          # 检查解密后的文件是否为有效JSON
           if ! jq empty decrypted_data.txt 2>/dev/null; then
             echo "错误: 解密后的数据不是有效的JSON"
+            echo "解密后数据内容(前100个字符):"
+            head -c 100 decrypted_data.txt
+            echo ""
             echo "完整解密数据长度: $(wc -c < decrypted_data.txt) 字节"
             exit 1
           fi
@@ -144,15 +149,16 @@ jobs:
             echo "解密后的JSON字段: $(jq 'keys' decrypted_data.txt)"
             exit 1
           else
-            echo "成功获取Docker密码 (已安全保存，未在日志中显示)"
-            # 安全地保存密码到GitHub输出变量
+            echo "成功获取Docker密码"
+            # 不显示密码，但显示长度
+            echo "Docker密码长度: ${#DOCKER_PASSWORD} 字符"
             echo "docker_password=$DOCKER_PASSWORD" >> $GITHUB_OUTPUT
           fi
           
           # 获取额外的敏感数据（如果有）
           OTHER_TOKEN=$(jq -r '.repo_token // ""' decrypted_data.txt)
           if [ -n "$OTHER_TOKEN" ] && [ "$OTHER_TOKEN" != "null" ]; then
-            echo "找到额外的repo_token (已安全保存，未在日志中显示)"
+            echo "找到额外的repo_token，长度: ${#OTHER_TOKEN} 字符"
             echo "repo_token=$OTHER_TOKEN" >> $GITHUB_OUTPUT
           else
             echo "未在加密数据中找到额外的repo_token，将使用明文提供的token（如果有）"
@@ -171,12 +177,13 @@ jobs:
           echo "- 代码仓库: ${{ github.event.inputs.repository }}"
           echo "- 分支: ${{ github.event.inputs.branch }}"
           echo "- Dockerfile路径: ${{ github.event.inputs.dockerfile }}"
-          # 不显示base64编码的镜像信息
+          echo "- 镜像信息(base64): ${{ github.event.inputs.image_info_base64 }}"
           echo "- 构建平台: ${{ github.event.inputs.platforms }}"
           
-          # 解码base64获取镜像信息JSON，但不在日志中显示原始内容
+          # 解码base64获取镜像信息JSON
           echo "解码镜像信息..."
           IMAGE_INFO_JSON=$(echo "${{ github.event.inputs.image_info_base64 }}" | base64 -d)
+          echo "解码后的镜像信息: $IMAGE_INFO_JSON"
           
           # 从JSON中提取镜像信息
           IMAGE_REGISTRY=$(echo $IMAGE_INFO_JSON | jq -r '.registry // "docker.io"')
@@ -236,17 +243,8 @@ jobs:
           
           if [ -n "$REPO_TOKEN" ]; then
             echo "使用令牌克隆仓库..."
-            # 设置git凭据助手，避免在日志中显示令牌
-            git config --global credential.helper store
-            echo "https://$REPO_TOKEN:x-oauth-basic@github.com" > ~/.git-credentials
-            chmod 600 ~/.git-credentials
-            
-            # 不在URL中包含令牌，使用凭据助手进行认证
-            git clone --depth 1 --branch ${{ github.event.inputs.branch }} ${{ github.event.inputs.repository }} ./source_code
-            
-            # 清理凭据
-            rm -f ~/.git-credentials
-            git config --global --unset credential.helper
+            REPO_URL=$(echo "${{ github.event.inputs.repository }}" | sed "s/https:\/\//https:\/\/$REPO_TOKEN@/g")
+            git clone --depth 1 --branch ${{ github.event.inputs.branch }} $REPO_URL ./source_code
           else
             echo "公开克隆仓库..."
             git clone --depth 1 --branch ${{ github.event.inputs.branch }} ${{ github.event.inputs.repository }} ./source_code
@@ -374,18 +372,16 @@ jobs:
           SIZE_MB=$(echo "scale=2; $IMAGE_SIZE/1024/1024" | bc)
           SIZE_GB=$(echo "scale=2; $IMAGE_SIZE/1024/1024/1024" | bc)
           
-          # 显示安全的镜像信息（不包含任何可能的凭据）
-          IMAGE_ID=$(docker inspect $IMAGE_NAME --format='{{.Id}}' | cut -d':' -f2 | cut -c1-12)
-          echo "镜像ID: $IMAGE_ID"
+          echo "镜像ID: $(docker inspect $IMAGE_NAME --format='{{.Id}}' | cut -d':' -f2 | cut -c1-12)"
           echo "镜像大小: $SIZE_MB MB ($SIZE_GB GB)"
           echo "镜像创建时间: $(docker inspect $IMAGE_NAME --format='{{.Created}}')"
           echo "镜像架构: $(docker inspect $IMAGE_NAME --format='{{.Os}}/{{.Architecture}}')"
           
           echo "image_size=$SIZE_MB MB ($SIZE_GB GB)" >> $GITHUB_ENV
           
-          # 获取镜像层信息，但不显示可能包含敏感信息的命令
-          echo "镜像层信息 (仅显示大小和创建时间):"
-          docker history --no-trunc --format "{{.Size}}\t{{.CreatedAt}}" $IMAGE_NAME
+          # 获取镜像层信息
+          echo "镜像层信息:"
+          docker history $IMAGE_NAME --no-trunc --human
 
       - name: 镜像安全扫描
         uses: aquasecurity/trivy-action@master

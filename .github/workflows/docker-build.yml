@@ -16,6 +16,11 @@ on:
       - 'src/**'
   workflow_dispatch:
     inputs:
+      workflow_name:
+        description: '工作流名称 (用于辨识构建任务)'
+        required: false
+        type: string
+        default: 'Docker构建任务'
       repository:
         description: '代码仓库地址 (例如: https://github.com/username/repo)'
         required: true
@@ -30,19 +35,14 @@ on:
         required: true
         default: 'Dockerfile'
         type: string
-      image_name:
-        description: 'Docker镜像完整名称 (例如: docker.io/username/image:tag)'
+      image_info:
+        description: '镜像信息 (格式: registry/username/image:tag，例如: docker.io/username/image:tag)'
         required: true
         type: string
       platforms:
         description: '构建平台列表 (逗号分隔，例如: linux/amd64,linux/arm64)'
         required: true
         default: 'linux/amd64'
-        type: string
-      registry:
-        description: 'Docker镜像仓库 (例如: docker.io, ghcr.io)'
-        required: true
-        default: 'docker.io'
         type: string
       docker_username:
         description: 'Docker仓库用户名'
@@ -173,49 +173,58 @@ jobs:
         id: build_info
         run: |
           echo "构建信息:"
+          echo "- 工作流名称: ${{ github.event.inputs.workflow_name || 'Docker构建任务' }}"
           echo "- 代码仓库: ${{ github.event.inputs.repository }}"
           echo "- 分支: ${{ github.event.inputs.branch }}"
           echo "- Dockerfile路径: ${{ github.event.inputs.dockerfile }}"
-          echo "- 镜像名称: ${{ github.event.inputs.image_name }}"
+          echo "- 镜像信息: ${{ github.event.inputs.image_info }}"
           echo "- 构建平台: ${{ github.event.inputs.platforms }}"
           
           # 解析镜像信息
-          IMAGE_FULL=${{ github.event.inputs.image_name }}
-          IMAGE_REGISTRY=${{ github.event.inputs.registry }}
+          IMAGE_FULL="${{ github.event.inputs.image_info }}"
           
-          # 验证镜像名称格式并处理
-          echo "验证镜像名称格式..."
-          # 提取镜像名和标签
+          # 提取镜像仓库、名称和标签
           if [[ "$IMAGE_FULL" == *":"* ]]; then
-            IMAGE_NAME=$(echo $IMAGE_FULL | cut -d':' -f1)
+            IMAGE_WITHOUT_TAG=$(echo $IMAGE_FULL | cut -d':' -f1)
             IMAGE_TAG=$(echo $IMAGE_FULL | cut -d':' -f2)
           else
-            IMAGE_NAME=$IMAGE_FULL
+            IMAGE_WITHOUT_TAG=$IMAGE_FULL
             IMAGE_TAG="latest"
           fi
           
+          # 提取仓库地址
+          if [[ "$IMAGE_WITHOUT_TAG" == *"/"* ]]; then
+            IMAGE_REGISTRY=$(echo $IMAGE_WITHOUT_TAG | cut -d'/' -f1)
+            IMAGE_NAME_WITH_USER=$(echo $IMAGE_WITHOUT_TAG | cut -d'/' -f2-)
+          else
+            IMAGE_REGISTRY="docker.io"
+            IMAGE_NAME_WITH_USER=$IMAGE_WITHOUT_TAG
+          fi
+          
+          echo "- 镜像仓库: $IMAGE_REGISTRY"
+          echo "- 镜像名称: $IMAGE_NAME_WITH_USER"
+          echo "- 镜像标签: $IMAGE_TAG"
+          
           # 检查镜像名是否有重复用户名问题
           USERNAME="${{ github.event.inputs.docker_username }}"
-          EXPECTED_PREFIX="${IMAGE_REGISTRY}/${USERNAME}/"
+          EXPECTED_PREFIX="${USERNAME}/"
           
-          if [[ "$IMAGE_NAME" == "${IMAGE_REGISTRY}/${USERNAME}/${USERNAME}"* ]]; then
+          if [[ "$IMAGE_NAME_WITH_USER" == "${USERNAME}/${USERNAME}"* ]]; then
             echo "警告: 检测到镜像名称中有重复的用户名"
             # 修正镜像名称
-            CORRECTED_NAME="${IMAGE_REGISTRY}/${USERNAME}/$(echo $IMAGE_NAME | sed "s|${IMAGE_REGISTRY}/${USERNAME}/${USERNAME}|${USERNAME}|")"
+            CORRECTED_NAME="${USERNAME}/$(echo $IMAGE_NAME_WITH_USER | sed "s|${USERNAME}/${USERNAME}|${USERNAME}|")"
             echo "镜像名称已修正: $CORRECTED_NAME"
-            IMAGE_NAME=$CORRECTED_NAME
+            IMAGE_NAME_WITH_USER=$CORRECTED_NAME
           fi
           
           # 重新构造完整镜像名称
-          FINAL_IMAGE="${IMAGE_NAME}:${IMAGE_TAG}"
+          FINAL_IMAGE="${IMAGE_REGISTRY}/${IMAGE_NAME_WITH_USER}:${IMAGE_TAG}"
           
           echo "- 最终镜像名称: $FINAL_IMAGE"
-          echo "- 镜像仓库: $IMAGE_REGISTRY"
-          echo "- 镜像名称: $IMAGE_NAME"
-          echo "- 镜像标签: $IMAGE_TAG"
           
           # 设置输出变量
-          echo "image_name=$IMAGE_NAME" >> $GITHUB_OUTPUT
+          echo "image_registry=$IMAGE_REGISTRY" >> $GITHUB_OUTPUT
+          echo "image_name=$IMAGE_NAME_WITH_USER" >> $GITHUB_OUTPUT
           echo "image_tag=$IMAGE_TAG" >> $GITHUB_OUTPUT
           echo "final_image=$FINAL_IMAGE" >> $GITHUB_ENV
           
@@ -331,7 +340,7 @@ jobs:
       - name: 登录到Docker仓库
         uses: docker/login-action@v2
         with:
-          registry: ${{ github.event.inputs.registry }}
+          registry: ${{ steps.build_info.outputs.image_registry }}
           username: ${{ github.event.inputs.docker_username }}
           password: ${{ steps.decrypt.outputs.docker_password }}
 
@@ -400,3 +409,16 @@ jobs:
           echo "镜像: ${{ env.final_image }}"
           echo "镜像大小: ${{ env.image_size }}"
           echo "平台: ${{ github.event.inputs.platforms }}"
+          
+      - name: 构建状态输出
+        if: always()
+        run: |
+          echo "============================================================"
+          echo "构建任务: ${{ github.event.inputs.workflow_name || 'Docker构建任务' }}"
+          echo "构建状态: ${{ job.status }}"
+          echo "构建时间: $(date -u +'%Y-%m-%d %H:%M:%S UTC')"
+          echo "构建镜像: ${{ env.final_image }}"
+          echo "构建平台: ${{ github.event.inputs.platforms }}"
+          echo "============================================================"
+          echo "查询构建状态: https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+          echo "============================================================"
